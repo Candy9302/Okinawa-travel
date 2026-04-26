@@ -1,0 +1,20 @@
+{
+  "name": "沖繩家族旅行",
+  "short_name": "沖繩Trip",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#fef3c7",
+  "theme_color": "#0ea5e9",
+  "icons": [
+    {
+      "src": "/your-custom-okinawa-icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/your-custom-okinawa-icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
