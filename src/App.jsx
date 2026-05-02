@@ -15,10 +15,23 @@ import {
   Edit2,
   ChevronRight,
   Utensils,
-  Coffee,
   ShoppingBag,
   Map,
+  Building,
+  Key,
+  Info,
 } from "lucide-react";
+import { db } from "./services/firebase";
+import {
+  collection,
+  addDoc,
+  onSnapshot,
+  deleteDoc,
+  doc,
+  updateDoc,
+  query,
+  orderBy,
+} from "firebase/firestore";
 
 const FAMILY_MEMBERS = ["爸爸", "媽媽", "妹妹", "書瑋", "我"];
 
@@ -28,17 +41,19 @@ export default function OkinawaTravelApp() {
   const [currency, setCurrency] = useState("JPY");
 
   // API States
-  const [exchangeRate, setExchangeRate] = useState(0.21); // 預設匯率
-  const [weather, setWeather] = useState(null);
-  const [editingId, setEditingId] = useState(null); // 新增這行：記錄正在編輯的 ID
+  const [exchangeRate, setExchangeRate] = useState(0.21);
+  const [weatherData, setWeatherData] = useState({});
+  const [editingId, setEditingId] = useState(null);
 
-  // 帳務 State (目前存 LocalStorage 模擬資料庫)
-  const [expenses, setExpenses] = useState(() => {
-    const saved = localStorage.getItem("okinawa_expenses");
-    return saved ? JSON.parse(saved) : [];
+  // 帳務 State
+  const [expenses, setExpenses] = useState([]);
+
+  // 飯店房號 State
+  const [rooms, setRooms] = useState(() => {
+    const saved = localStorage.getItem("okinawa_rooms");
+    return saved ? JSON.parse(saved) : { montpa: "", urbansea: "" };
   });
 
-  // 記帳表單 State
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [expenseForm, setExpenseForm] = useState({
     title: "",
@@ -47,37 +62,48 @@ export default function OkinawaTravelApp() {
     splitAmong: [...FAMILY_MEMBERS],
   });
 
-  // 1. 抓取真實匯率與天氣 API
   useEffect(() => {
-    // 匯率 API (JPY to TWD)
+    localStorage.setItem("okinawa_rooms", JSON.stringify(rooms));
+  }, [rooms]);
+
+  useEffect(() => {
+    const q = query(collection(db, "expenses"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const expenseData = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setExpenses(expenseData);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     fetch("https://api.exchangerate-api.com/v4/latest/JPY")
       .then((res) => res.json())
       .then((data) => setExchangeRate(data.rates.TWD))
       .catch(console.error);
 
-    // Open-Meteo 天氣 API (那霸)
     fetch(
-      "https://api.open-meteo.com/v1/forecast?latitude=26.2124&longitude=127.6809&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo",
+      "https://api.open-meteo.com/v1/forecast?latitude=26.2124&longitude=127.6809&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&forecast_days=16",
     )
       .then((res) => res.json())
       .then((data) => {
         if (data.daily) {
-          setWeather({
-            max: data.daily.temperature_2m_max[0],
-            min: data.daily.temperature_2m_min[0],
-            code: data.daily.weathercode[0],
+          const newWeather = {};
+          data.daily.time.forEach((date, index) => {
+            newWeather[date] = {
+              max: data.daily.temperature_2m_max[index],
+              min: data.daily.temperature_2m_min[index],
+              code: data.daily.weathercode[index],
+            };
           });
+          setWeatherData(newWeather);
         }
       })
       .catch(console.error);
   }, []);
 
-  // 2. 存入 LocalStorage (後續可替換為 Firebase)
-  useEffect(() => {
-    localStorage.setItem("okinawa_expenses", JSON.stringify(expenses));
-  }, [expenses]);
-
-  // 3. 妹妹生日彩蛋
   useEffect(() => {
     const today = new Date();
     if (today.getMonth() === 4 && today.getDate() === 13) {
@@ -85,44 +111,6 @@ export default function OkinawaTravelApp() {
     }
   }, []);
 
-  // 新增/刪除花費邏輯
-  const handleAddExpense = (e) => {
-    e.preventDefault();
-    if (!expenseForm.title || !expenseForm.amount) return;
-
-    const newExpense = {
-      id: Date.now(),
-      title: expenseForm.title,
-      amount: Number(expenseForm.amount),
-      payer: expenseForm.payer,
-      splitAmong: expenseForm.splitAmong,
-    };
-
-    setExpenses([newExpense, ...expenses]);
-    setShowExpenseForm(false);
-    setExpenseForm({
-      title: "",
-      amount: "",
-      payer: "我",
-      splitAmong: [...FAMILY_MEMBERS],
-    });
-  };
-
-  const handleDeleteExpense = (id) => {
-    if (window.confirm("確定要刪除這筆帳目嗎？")) {
-      setExpenses(expenses.filter((e) => e.id !== id));
-    }
-  };
-
-  const handleToggleSplitMember = (member) => {
-    setExpenseForm((prev) => ({
-      ...prev,
-      splitAmong: prev.splitAmong.includes(member)
-        ? prev.splitAmong.filter((m) => m !== member)
-        : [...prev.splitAmong, member],
-    }));
-  };
-  // 點擊編輯按鈕時，把資料塞回表單
   const handleEditExpense = (exp) => {
     setExpenseForm({
       title: exp.title,
@@ -134,42 +122,42 @@ export default function OkinawaTravelApp() {
     setShowExpenseForm(true);
   };
 
-  // 儲存邏輯 (區分新增或更新)
-  const handleSaveExpense = (e) => {
+  const handleSaveExpense = async (e) => {
     e.preventDefault();
     if (!expenseForm.title || !expenseForm.amount) return;
 
-    if (editingId) {
-      // 更新現有資料
-      setExpenses(
-        expenses.map((exp) =>
-          exp.id === editingId
-            ? { ...exp, ...expenseForm, amount: Number(expenseForm.amount) }
-            : exp,
-        ),
-      );
-      setEditingId(null);
-    } else {
-      // 新增資料
-      const newExpense = {
-        id: Date.now(),
-        title: expenseForm.title,
-        amount: Number(expenseForm.amount),
-        payer: expenseForm.payer,
-        splitAmong: expenseForm.splitAmong,
-      };
-      setExpenses([newExpense, ...expenses]);
-    }
+    const dataToSave = { ...expenseForm };
+    const currentEditId = editingId;
+
     setShowExpenseForm(false);
+    setEditingId(null);
     setExpenseForm({
       title: "",
       amount: "",
       payer: "我",
       splitAmong: [...FAMILY_MEMBERS],
     });
+
+    try {
+      if (currentEditId) {
+        const docRef = doc(db, "expenses", currentEditId);
+        await updateDoc(docRef, {
+          ...dataToSave,
+          amount: Number(dataToSave.amount),
+        });
+      } else {
+        await addDoc(collection(db, "expenses"), {
+          ...dataToSave,
+          amount: Number(dataToSave.amount),
+          createdAt: Date.now(),
+        });
+      }
+    } catch (error) {
+      console.error("寫入失敗：", error);
+      alert(`Firebase 寫入失敗！\n錯誤訊息：${error.message}`);
+    }
   };
 
-  // 取消編輯時也要清空狀態
   const handleCloseForm = () => {
     setShowExpenseForm(false);
     setEditingId(null);
@@ -180,27 +168,50 @@ export default function OkinawaTravelApp() {
       splitAmong: [...FAMILY_MEMBERS],
     });
   };
-  // 轉換日圓到台幣
+
+  const handleDeleteExpense = async (id) => {
+    if (window.confirm("確定要刪除這筆帳目嗎？")) {
+      try {
+        await deleteDoc(doc(db, "expenses", id));
+      } catch (error) {
+        alert(`刪除失敗：${error.message}`);
+      }
+    }
+  };
+
+  const handleToggleSplitMember = (member) => {
+    setExpenseForm((prev) => ({
+      ...prev,
+      splitAmong: prev.splitAmong.includes(member)
+        ? prev.splitAmong.filter((m) => m !== member)
+        : [...prev.splitAmong, member],
+    }));
+  };
+
   const formatTWD = (jpy) =>
     `NT$ ${Math.round(jpy * exchangeRate).toLocaleString()}`;
   const totalPublicSpent = expenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-  // 天氣代碼轉換 Icon
   const getWeatherIcon = (code) => {
-    if (!code) return <Sun size={18} className="text-yellow-500" />;
-    if (code <= 3) return <Cloud size={18} className="text-gray-400" />;
-    return <CloudRain size={18} className="text-blue-400" />;
+    if (code === undefined)
+      return <Cloud size={16} className="text-slate-300" />;
+    if (code <= 3) return <Sun size={16} className="text-yellow-500" />;
+    return <CloudRain size={16} className="text-blue-400" />;
   };
 
   return (
     <div className="min-h-screen bg-[#f3f8f9] font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden text-slate-700">
-      {/* 妹妹生日 Popup */}
+      <style>{`
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
+
       {showBirthday && (
         <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-8 text-center shadow-2xl relative animate-bounce">
             <button
               onClick={() => setShowBirthday(false)}
-              className="absolute top-4 right-4 text-gray-400"
+              className="absolute top-4 right-4 text-slate-400"
             >
               <X size={24} />
             </button>
@@ -213,23 +224,22 @@ export default function OkinawaTravelApp() {
         </div>
       )}
 
-      {/* Header - 改為柔和的莫蘭迪藍色調 */}
       <header className="bg-gradient-to-r from-[#93C5FD] to-[#A5F3FC] p-5 rounded-b-3xl shadow-sm sticky top-0 z-40">
         <div className="flex justify-between items-center text-slate-800">
           <div>
-            <h1 className="text-xl font-extrabold tracking-wider text-slate-800">
+            <h1 className="text-xl font-extrabold tracking-wider">
               🌺 沖繩家族旅行
             </h1>
-            <p className="text-sm font-medium text-slate-700">5/10 - 5/15</p>
+            <p className="text-sm font-medium opacity-90">5/10 - 5/15</p>
           </div>
           <div
-            className="bg-white/40 backdrop-blur-md px-3 py-2 rounded-2xl flex items-center gap-2 cursor-pointer border border-white/50 shadow-sm"
             onClick={() => setActiveTab("accounting")}
+            className="bg-white/40 backdrop-blur-md px-3 py-2 rounded-2xl flex items-center gap-2 cursor-pointer border border-white/50 shadow-sm"
           >
             <PiggyBank size={24} className="text-amber-500" />
             <div className="text-right">
               <p className="text-[10px] font-bold text-slate-600">總花費</p>
-              <p className="font-extrabold text-sm text-slate-800">
+              <p className="font-extrabold text-sm">
                 {currency === "JPY"
                   ? `¥ ${totalPublicSpent.toLocaleString()}`
                   : formatTWD(totalPublicSpent)}
@@ -239,38 +249,51 @@ export default function OkinawaTravelApp() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="p-4 pb-28 overflow-y-auto h-[calc(100vh-80px)]">
+      <main
+        id="main-scroll"
+        className="pb-28 overflow-y-auto h-[calc(100vh-80px)] relative"
+      >
         {activeTab === "itinerary" && (
           <ItineraryView
-            weather={weather}
+            weatherData={weatherData}
             getWeatherIcon={getWeatherIcon}
-            exchangeRate={exchangeRate}
+            rooms={rooms}
+            setRooms={setRooms}
           />
         )}
-
         {activeTab === "accounting" && (
-          <AccountingView
-            expenses={expenses}
-            currency={currency}
-            setCurrency={setCurrency}
-            formatTWD={formatTWD}
-            showExpenseForm={showExpenseForm}
-            setShowExpenseForm={setShowExpenseForm}
-            expenseForm={expenseForm}
-            setExpenseForm={setExpenseForm}
-            handleAddExpense={handleAddExpense}
-            handleDeleteExpense={handleDeleteExpense}
-            handleToggleSplitMember={handleToggleSplitMember}
-          />
+          <div className="p-4">
+            <AccountingView
+              expenses={expenses}
+              currency={currency}
+              setCurrency={setCurrency}
+              formatTWD={formatTWD}
+              showExpenseForm={showExpenseForm}
+              setShowExpenseForm={setShowExpenseForm}
+              expenseForm={expenseForm}
+              setExpenseForm={setExpenseForm}
+              handleSaveExpense={handleSaveExpense}
+              handleDeleteExpense={handleDeleteExpense}
+              handleToggleSplitMember={handleToggleSplitMember}
+              handleEditExpense={handleEditExpense}
+              handleCloseForm={handleCloseForm}
+              editingId={editingId}
+            />
+          </div>
         )}
-
-        {activeTab === "flights" && <FlightsView />}
-        {activeTab === "coupons" && <CouponsView />}
+        {activeTab === "flights" && (
+          <div className="p-4">
+            <FlightsView />
+          </div>
+        )}
+        {activeTab === "coupons" && (
+          <div className="p-4">
+            <CouponsView />
+          </div>
+        )}
       </main>
 
-      {/* Bottom Nav */}
-      <nav className="fixed bottom-0 w-full max-w-md bg-white/90 backdrop-blur-lg border-t border-slate-100 flex justify-around p-3 pb-safe shadow-[0_-10px_40px_rgba(0,0,0,0.05)] rounded-t-3xl z-40">
+      <nav className="fixed bottom-0 w-full max-w-md bg-white/95 backdrop-blur-lg border-t border-slate-200 flex justify-around p-3 pb-safe shadow-[0_-10px_40px_rgba(0,0,0,0.05)] rounded-t-3xl z-40">
         <NavItem
           icon={<MapPin />}
           label="行程"
@@ -300,12 +323,11 @@ export default function OkinawaTravelApp() {
   );
 }
 
-// 導覽按鈕
 function NavItem({ icon, label, isActive, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`flex flex-col items-center transition-all duration-300 ${isActive ? "text-sky-600 scale-110" : "text-slate-400 hover:text-sky-400"}`}
+      className={`flex flex-col items-center transition-all duration-300 ${isActive ? "text-sky-600 scale-110" : "text-slate-400 hover:text-sky-500"}`}
     >
       {React.cloneElement(icon, { size: 22, strokeWidth: isActive ? 2.5 : 2 })}
       <span
@@ -317,138 +339,479 @@ function NavItem({ icon, label, isActive, onClick }) {
   );
 }
 
-// --- 視圖模組 (Views) ---
+// --- 行程畫面模組 ---
+function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
+  const [selectedOptions, setSelectedOptions] = useState(null);
+  const [activeDay, setActiveDay] = useState(0);
+  const [isEditingRooms, setIsEditingRooms] = useState(false);
 
-function ItineraryView({ weather, getWeatherIcon, exchangeRate }) {
-  // 完整的六天行程資料結構
+  const tripDates = [
+    {
+      id: 0,
+      title: "DAY 1",
+      date: "1/21",
+      realDate: "5/10",
+      fullDate: "2026-05-10",
+    },
+    {
+      id: 1,
+      title: "DAY 2",
+      date: "1/22",
+      realDate: "5/11",
+      fullDate: "2026-05-11",
+    },
+    {
+      id: 2,
+      title: "DAY 3",
+      date: "1/23",
+      realDate: "5/12",
+      fullDate: "2026-05-12",
+    },
+    {
+      id: 3,
+      title: "DAY 4",
+      date: "1/24",
+      realDate: "5/13",
+      fullDate: "2026-05-13",
+    },
+    {
+      id: 4,
+      title: "DAY 5",
+      date: "1/25",
+      realDate: "5/14",
+      fullDate: "2026-05-14",
+    },
+    {
+      id: 5,
+      title: "DAY 6",
+      date: "1/26",
+      realDate: "5/15",
+      fullDate: "2026-05-15",
+    },
+  ];
+
+  const scrollToDay = (index) => {
+    setActiveDay(index);
+    const element = document.getElementById(`day-${index}`);
+    const mainScroll = document.getElementById("main-scroll");
+    if (element && mainScroll) {
+      const topOffset = element.offsetTop - 100;
+      mainScroll.scrollTo({ top: topOffset, behavior: "smooth" });
+    }
+  };
+
   const itineraryData = [
     {
-      date: "5/10 (日)",
-      title: "抵達與美國村",
+      title: "抵達與北谷美國村",
       items: [
         {
           type: "flight",
           time: "12:20",
-          title: "抵達 OKA (MM922)",
-          desc: "取車前往北谷 (約40分)",
+          title: "抵達 OKA",
+          desc: "前往租車接送點",
+        },
+        {
+          type: "spot",
+          time: "13:00",
+          title: "取車 (三菱 Delica)",
+          desc: "自駕，尋找大型停車場",
+        },
+        {
+          type: "spot",
+          time: "15:00",
+          title: "蒙帕公寓式飯店 Check-in",
+          desc: "約40分車程，美國村旁",
+        },
+        {
+          type: "food",
+          time: "午餐",
+          title: "午餐 (3家備案選1)",
+          desc: "點擊查看選項",
+          options: [
+            {
+              name: "泊港漁市場",
+              desc: "推薦現切鮪魚。有代客料理+內用座位。",
+              map: "https://maps.google.com/?q=泊港漁市場",
+            },
+            {
+              name: "A&W Makiminato",
+              desc: "停好車在車上點餐！推薦：麥根沙士、捲薯條。",
+              map: "https://maps.google.com/?q=A&W+Makiminato",
+            },
+            {
+              name: "Tonkatsu Taro Chatan",
+              desc: "25公分巨大炸蝦！",
+              map: "https://maps.google.com/?q=Tonkatsu+Taro+Chatan",
+            },
+          ],
         },
         {
           type: "spot",
           time: "下午",
-          title: "美國村逛街 & 日落海灘",
-          desc: "看海、放鬆",
+          title: "美國村 (American Village)",
+          desc: "點擊查看必吃必逛清單",
+          options: [
+            {
+              name: "Cheesus cafe",
+              desc: "必吃熱騰騰烤起司三明治！",
+              map: "https://maps.google.com/?q=Cheesus+cafe+北谷",
+            },
+            {
+              name: "焼き芋 自動販売機",
+              desc: "超特別！路邊熱騰騰烤地瓜自動販賣機",
+              map: "https://maps.google.com/?q=北谷+烤地瓜販賣機",
+            },
+            {
+              name: "GIGO 北谷",
+              desc: "夾娃娃機、扭蛋天堂",
+              map: "https://maps.google.com/?q=GIGO+北谷",
+            },
+            {
+              name: "Blue Seal (北谷店)",
+              desc: "營業 11:00–21:00。推薦沖繩鹽餅乾 / 紅芋冰，海景第一排吃冰淇淋！",
+              map: "https://maps.google.com/?q=Blue+Seal+北谷",
+            },
+          ],
         },
         {
           type: "food",
           time: "晚餐",
-          title: "小料理 廉",
-          desc: "海鮮餐廳，免開車",
+          title: "晚餐選項",
+          desc: "點擊查看選項",
+          options: [
+            {
+              name: "暖暮 北谷砂邊店",
+              desc: "經典沖繩拉麵",
+              map: "https://maps.google.com/?q=暖暮+北谷砂邊店",
+            },
+            {
+              name: "歩炉 北谷店",
+              desc: "推薦：串燒、肥鮪魚捲、10塊烤肉拼盤",
+              map: "https://maps.google.com/?q=歩炉+北谷店",
+            },
+          ],
         },
       ],
     },
     {
-      date: "5/11 (一)",
-      title: "海洋博公園",
+      title: "古宇利島 + 水族館",
       items: [
         {
           type: "spot",
           time: "08:30",
-          title: "美麗海水族館",
-          desc: "早點出發避開人潮",
-        },
-        {
-          type: "food",
-          time: "午餐",
-          title: "沖繩麵 (北部)",
-          desc: "或在水族館內簡單吃",
-        },
-        { type: "spot", time: "下午", title: "古宇利島", desc: "喝杯咖啡放鬆" },
-        {
-          type: "shopping",
-          time: "傍晚",
-          title: "麵包店補給",
-          desc: "買明天早餐",
-        },
-      ],
-    },
-    {
-      date: "5/12 (二)",
-      title: "往南移動",
-      items: [
-        {
-          type: "food",
-          time: "午餐",
-          title: "北谷往那霸路上餐廳",
-          desc: "順路吃不繞道",
+          title: "出發前往北部",
+          desc: "早點出發避車潮",
         },
         {
           type: "spot",
-          time: "下午",
-          title: "Hotel Urbansea Check-in",
-          desc: "國際通附近",
+          time: "10:00",
+          title: "古宇利島",
+          desc: "點擊查看景點與美食",
+          options: [
+            {
+              name: "古宇利大橋 & 心型岩",
+              desc: "必拍絕美海景與心型礁岩。",
+              map: "https://maps.google.com/?q=古宇利島心型岩",
+            },
+            {
+              name: "KOURI SHRIMP (蝦蝦飯)",
+              desc: "營業時間 11:00 - 16:00。古宇利島必吃夏威夷蒜香蝦蝦飯！",
+              map: "https://maps.google.com/?q=KOURI+SHRIMP",
+            },
+            {
+              name: "Shinmei Coffee",
+              desc: "營業時間 10:30 - 16:30。大推現刨黑糖飲料！",
+              map: "https://maps.google.com/?q=Shinmei+Coffee",
+            },
+          ],
         },
-        { type: "spot", time: "傍晚", title: "國際通逛街", desc: "採買伴手禮" },
         {
-          type: "food",
-          time: "晚餐",
-          title: "牧志公設市場",
-          desc: "國際通內，免開車",
+          type: "spot",
+          time: "13:00",
+          title: "美麗海水族館",
+          desc: "預計停留 1.5hr",
+        },
+        {
+          type: "info",
+          time: "14:30",
+          title: "🐬 海豚秀",
+          desc: "在水族館戶外展區",
+        },
+        {
+          type: "spot",
+          time: "傍晚",
+          title: "回程停留",
+          desc: "點擊查看回程推薦",
+          options: [
+            {
+              name: "星巴克 名護21世紀之森公園店",
+              desc: "特色水果星冰樂！風景優美的休息站。",
+              map: "https://maps.google.com/?q=星巴克+名護21世紀之森公園",
+            },
+            {
+              name: "海人料理 亀ぬ浜",
+              desc: "營業時間 17:00 - 21:00。晚餐好去處。",
+              map: "https://maps.google.com/?q=海人料理+亀ぬ浜",
+            },
+          ],
         },
       ],
     },
     {
-      date: "5/13 (三)",
-      title: "神社與南部",
+      title: "北谷 → 那霸 (中部往南)",
       items: [
+        {
+          type: "spot",
+          time: "10:00",
+          title: "退房與移動",
+          desc: "前往那霸市區",
+        },
+        {
+          type: "food",
+          time: "午餐",
+          title: "途中美食大搜查",
+          desc: "點擊查看美食清單",
+          options: [
+            {
+              name: "港川外人住宅雞湯拉麵屋 いしぐふ",
+              desc: "初代沖繩麵王！",
+              map: "https://maps.google.com/?q=いしぐふ+港川",
+            },
+            {
+              name: ".uki",
+              desc: "營業時間 7:00 - 17:00",
+              map: "https://maps.google.com/?q=.uki+okinawa",
+            },
+            {
+              name: "oHacorte 港川店",
+              desc: "超美特色水果塔",
+              map: "https://maps.google.com/?q=oHacorte+港川店",
+            },
+            {
+              name: "Houki Boshi",
+              desc: "必買黑糖可麗露",
+              map: "https://maps.google.com/?q=Houki+Boshi",
+            },
+          ],
+        },
+        {
+          type: "spot",
+          time: "15:00",
+          title: "Hotel Urbansea 2 Check-in",
+          desc: "國際通附近",
+        },
+        {
+          type: "shopping",
+          time: "下午",
+          title: "國際通採買",
+          desc: "點擊查看必買伴手禮與地圖",
+          options: [
+            {
+              name: "松原屋製菓",
+              desc: "必買：沙翁 (沖繩傳統炸甜甜圈)，營業時間 09:00–18:00。",
+              map: "https://maps.google.com/?q=松原屋製菓",
+            },
+            {
+              name: "福助玉子燒",
+              desc: "必吃：玉子燒飯糰。",
+              map: "https://maps.google.com/?q=福助玉子燒+那霸",
+            },
+            {
+              name: "Mochi-no-mise Yamaya",
+              desc: "沖繩傳統麻糬專賣店。",
+              map: "https://maps.google.com/?q=Mochi-no-mise+Yamaya",
+            },
+            {
+              name: "琉球牛乳餅",
+              desc: "必買人氣特色伴手禮。",
+              map: "https://maps.google.com/?q=琉球牛乳餅",
+            },
+            {
+              name: "Hama Shokhuin",
+              desc: "推薦：花生豆腐。",
+              map: "https://maps.google.com/?q=Hama+Shokhuin",
+            },
+            {
+              name: "Jisakasu",
+              desc: "充滿特色的在地二手小店。",
+              map: "https://maps.google.com/?q=Jisakasu+okinawa",
+            },
+          ],
+        },
+        {
+          type: "food",
+          time: "晚餐",
+          title: "晚餐選項 (擇一)",
+          desc: "點擊查看",
+          options: [
+            {
+              name: "國際通屋台村",
+              desc: "從飯店走路只要 8 分鐘",
+              map: "https://maps.google.com/?q=國際通屋台村",
+            },
+            {
+              name: "Okiraku",
+              desc: "好吃的關東煮",
+              map: "https://maps.google.com/?q=Okiraku+okinawa",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      title: "南部景點 + 神社",
+      items: [
+        {
+          type: "food",
+          time: "早餐",
+          title: "早餐 2 選 1",
+          desc: "點擊查看",
+          options: [
+            {
+              name: "Marutama味噌飯屋",
+              desc: "160多年老店，推薦肉味增納豆。",
+              map: "https://maps.google.com/?q=Marutama味噌飯屋",
+            },
+            {
+              name: "おにぎり屋 縁むすび",
+              desc: "日式飯糰",
+              map: "https://maps.google.com/?q=おにぎり屋+縁むすび",
+            },
+          ],
+        },
         {
           type: "spot",
           time: "上午",
           title: "波上宮",
-          desc: "早去人少，海邊神社拍照",
+          desc: "點擊查看參拜步驟與注意事項",
+          options: [
+            {
+              name: "波上宮參拜須知",
+              desc: "還御守。御守授與時間為 9:00～17:00\n\n【淨化儀式：手水舍】\n參拜前，請先在入口處的「手水舍」進行淨手淨口：\n1. 用勺子舀水清洗左手、右手。\n2. 用左手漱口。\n3. 將勺子直立，讓剩餘的水流下清洗勺柄。\n\n【參拜流程】\n1. 投幣（5円）\n2. 搖鈴\n3. 二拜二拍（深深鞠躬兩次，拍手兩下，以示尊敬。）\n4. 合掌祈禱\n5. 一拜",
+              map: "https://maps.google.com/?q=波上宮",
+            },
+          ],
         },
         {
           type: "spot",
           time: "下午",
-          title: "南部海景 或 Outlet",
-          desc: "親子輕鬆版行程",
+          title: "波之上海空公園 & 無印",
+          desc: "無印良品 那霸Main Place店",
         },
-        { type: "food", time: "點心", title: "紅芋莎翁", desc: "推薦甜點" },
         {
           type: "food",
           time: "晚餐",
-          title: "居酒屋",
-          desc: "氣氛好，適合聚餐",
+          title: "燒肉 & 購物",
+          desc: "唐吉訶德那霸壺川店 (人少好逛)",
         },
       ],
     },
     {
-      date: "5/14 (四)",
-      title: "彈性自由日",
+      title: "美食與購物日",
       items: [
         {
-          type: "spot",
-          time: "全天",
-          title: "Buffer Day",
-          desc: "帶長輩小孩必備的彈性時間",
+          type: "food",
+          time: "07:00",
+          title: "早餐：Furinkazan 風林火山",
+          desc: "點擊查看地圖",
+          options: [
+            {
+              name: "Furinkazan 風林火山",
+              desc: "營業時間 07:00–11:00 (周三公休)。日式特色早餐。",
+              map: "https://maps.google.com/?q=風林火山+那霸",
+            },
+          ],
         },
-        { type: "food", time: "午餐", title: "豬排飯", desc: "補吃推薦美食" },
+        {
+          type: "food",
+          time: "午餐",
+          title: "漁師食堂 (大ばんぶる舞)",
+          desc: "點擊查看完整菜單",
+          options: [
+            {
+              name: "🐟 生食推薦菜單",
+              desc: "• 肥美赤甜蝦刺身(2尾) ¥380\n• 生食級生蠔佐醋醬(1個) ¥280\n• 增量漁師丼 OR 增量蔥鮪丼 ¥1,290\n• 定番海鮮丼(附醋飯) ¥1,080",
+              map: "https://maps.google.com/?q=大ばんぶる舞",
+            },
+            {
+              name: "🍤 熟食推薦菜單",
+              desc: "• 大ばんぶる舞鰻魚丼 約¥2,380\n• 炸蝦丼 (えびだけ丼)\n• 厚切炸竹筴魚定食\n• 煎魚定食 / 魚湯定食 (熱湯OK)\n• 鮪魚排咖哩",
+              map: "https://maps.google.com/?q=大ばんぶる舞",
+            },
+          ],
+        },
         {
           type: "shopping",
           time: "下午",
-          title: "國際通補買",
-          desc: "最後血拚時間",
+          title: "市區逛街",
+          desc: "點擊查看店家資訊",
+          options: [
+            {
+              name: "hoppepan",
+              desc: "營業時間 10:00–19:00 (二,三休息)。必買：明太子法國麵包、炸蝦堡！",
+              map: "https://maps.google.com/?q=hoppepan",
+            },
+            {
+              name: "UNIQLO & 無印良品",
+              desc: "天久店或那霸Main Place店",
+              map: "https://maps.google.com/?q=無印良品+那霸",
+            },
+          ],
+        },
+        {
+          type: "food",
+          time: "晚餐",
+          title: "傑克牛排館 (Jack's Steak House)",
+          desc: "點擊查看地圖",
+          options: [
+            {
+              name: "傑克牛排館",
+              desc: "營業時間 11:00 - 22:30 (星期三休息)。沖繩經典老字號美式牛排館。",
+              map: "https://maps.google.com/?q=傑克牛排館",
+            },
+          ],
         },
       ],
     },
     {
-      date: "5/15 (五)",
-      title: "回程",
+      title: "賦歸",
       items: [
-        { type: "spot", time: "14:00", title: "前往機場", desc: "抓1小時車程" },
+        {
+          type: "food",
+          time: "09:00",
+          title: "BOULANGERIE BZ",
+          desc: "點擊查看地圖",
+          options: [
+            {
+              name: "BOULANGERIE BZ",
+              desc: "營業時間 09:00–19:00。大推迷你可頌，必買外帶回台灣！",
+              map: "https://maps.google.com/?q=BOULANGERIE+BZ",
+            },
+          ],
+        },
+        {
+          type: "food",
+          time: "午餐",
+          title: "琉球新麵 通堂 小祿本店",
+          desc: "點擊查看推薦麵款",
+          options: [
+            {
+              name: "琉球新麵 通堂 (小祿本店)",
+              desc: "營業時間 11:00–23:30\n\n🍜 男人麵：豚骨湯，味道濃郁偏重口味，圓細麵。\n🍜 女人麵：雞高湯，味道清爽偏輕淡口味，扁細麵。",
+              map: "https://maps.google.com/?q=琉球新麵+通堂+小祿本店",
+            },
+          ],
+        },
+        {
+          type: "spot",
+          time: "13:30",
+          title: "抵達租車公司還車",
+          desc: "滿油還車、保留加油收據！",
+        },
         {
           type: "flight",
-          time: "16:10",
-          title: "起飛 (OD883)",
+          time: "16:50",
+          title: "那霸起飛 (OKA)",
           desc: "17:30 抵達桃園",
         },
       ],
@@ -465,65 +828,249 @@ function ItineraryView({ weather, getWeatherIcon, exchangeRate }) {
         return <Utensils className="text-orange-400" size={18} />;
       case "shopping":
         return <ShoppingBag className="text-rose-400" size={18} />;
+      case "info":
+        return <Info className="text-indigo-400" size={18} />;
       default:
         return <Map className="text-slate-400" size={18} />;
     }
   };
 
+  const getModalIcon = (type, size = 20) => {
+    if (type === "food")
+      return <Utensils size={size} className="text-orange-400" />;
+    if (type === "shopping")
+      return <ShoppingBag size={size} className="text-rose-500" />;
+    if (type === "info")
+      return <Info size={size} className="text-indigo-400" />;
+    return <MapPin size={size} className="text-teal-500" />;
+  };
+
   return (
-    <div className="space-y-6">
-      {/* 資訊看板 */}
-      <div className="bg-white rounded-2xl p-4 flex items-center justify-between shadow-sm border border-slate-100">
-        <div>
-          <h3 className="font-bold flex items-center gap-2 text-slate-700">
-            {getWeatherIcon(weather?.code)} 那霸天氣
-          </h3>
-          <p className="text-sm text-slate-500 mt-1">
-            {weather ? `${weather.min}°C - ${weather.max}°C` : "載入中..."}
-          </p>
-        </div>
-        <div className="text-right border-l pl-4 border-slate-100">
-          <p className="text-xs text-slate-400">即時匯率 (TWD)</p>
-          <p className="font-extrabold text-lg text-slate-700">
-            {exchangeRate.toFixed(3)}
-          </p>
+    <div className="bg-[#f3f8f9]">
+      <div className="sticky top-0 z-30 bg-[#f3f8f9] pt-4 pb-2 border-b border-sky-100 shadow-sm">
+        <div className="flex overflow-x-auto gap-3 px-4 snap-x hide-scrollbar">
+          {tripDates.map((d, i) => {
+            const weather = weatherData[d.fullDate];
+            const isActive = activeDay === i;
+            return (
+              <div
+                key={i}
+                onClick={() => scrollToDay(i)}
+                className={`min-w-[85px] snap-start cursor-pointer rounded-[20px] py-3 px-2 flex flex-col items-center transition-all border-2 
+                  ${isActive ? "border-sky-500 bg-white shadow-sm" : "border-transparent bg-white shadow-sm opacity-70"}`}
+              >
+                <span
+                  className={`text-[10px] font-extrabold ${isActive ? "text-slate-500" : "text-slate-400"}`}
+                >
+                  {d.title}
+                </span>
+                <span
+                  className={`text-xl font-extrabold mt-1 leading-none ${isActive ? "text-sky-700" : "text-sky-600"}`}
+                >
+                  {d.realDate}
+                </span>
+                <div className="flex items-center justify-center gap-1 mt-2 text-slate-500 text-xs font-medium">
+                  {getWeatherIcon(weather?.code)}{" "}
+                  {weather ? `${weather.max}°` : "-°"}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* 行程列表 */}
-      <div className="relative border-l-2 border-sky-200 ml-4 pl-6 py-2 space-y-8">
-        {itineraryData.map((day, index) => (
-          <div key={index} className="relative">
-            <div className="absolute -left-[35px] top-0 bg-sky-100 text-sky-700 border-2 border-white w-8 h-8 rounded-full flex items-center justify-center font-bold shadow-sm">
-              {index + 1}
-            </div>
-            <h2 className="text-lg font-bold text-slate-800">
-              {day.date} {day.title}
-            </h2>
+      <div className="p-4 space-y-6">
+        <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-extrabold text-slate-800 flex items-center gap-2 text-lg">
+              <Building size={20} className="text-slate-700" /> 住宿房號紀錄
+            </h3>
+            <button
+              onClick={() => setIsEditingRooms(!isEditingRooms)}
+              className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-1.5 rounded-full text-sm font-bold flex items-center gap-1 active:scale-95 transition-transform"
+            >
+              <Edit2 size={14} /> {isEditingRooms ? "完成" : "編輯"}
+            </button>
+          </div>
 
-            <div className="mt-3 bg-white rounded-2xl p-4 shadow-sm border border-slate-50 space-y-4">
-              {day.items.map((item, idx) => (
-                <div key={idx} className="flex gap-3 items-start">
-                  <div className="mt-1 p-1.5 bg-slate-50 rounded-lg">
-                    {getIcon(item.type)}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="border-2 border-dashed border-slate-200 rounded-2xl p-3.5 bg-[#f8fafc]">
+              <p className="text-[11px] font-extrabold text-slate-400 mb-1.5">
+                ROOM 1 (北谷)
+              </p>
+              <div className="flex items-center gap-2">
+                <Key size={16} className="text-slate-300" />
+                {isEditingRooms ? (
+                  <input
+                    type="text"
+                    placeholder="輸入房號"
+                    value={rooms.montpa}
+                    onChange={(e) =>
+                      setRooms({ ...rooms, montpa: e.target.value })
+                    }
+                    className="w-full bg-white border border-slate-200 p-1.5 rounded-lg font-bold text-sky-700 outline-none text-center shadow-sm focus:ring-2 focus:ring-sky-200"
+                  />
+                ) : (
+                  <span className="font-extrabold text-slate-700 text-lg tracking-wider">
+                    {rooms.montpa || "---"}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="border-2 border-dashed border-slate-200 rounded-2xl p-3.5 bg-[#f8fafc]">
+              <p className="text-[11px] font-extrabold text-slate-400 mb-1.5">
+                ROOM 2 (那霸)
+              </p>
+              <div className="flex items-center gap-2">
+                <Key size={16} className="text-slate-300" />
+                {isEditingRooms ? (
+                  <input
+                    type="text"
+                    placeholder="輸入房號"
+                    value={rooms.urbansea}
+                    onChange={(e) =>
+                      setRooms({ ...rooms, urbansea: e.target.value })
+                    }
+                    className="w-full bg-white border border-slate-200 p-1.5 rounded-lg font-bold text-sky-700 outline-none text-center shadow-sm focus:ring-2 focus:ring-sky-200"
+                  />
+                ) : (
+                  <span className="font-extrabold text-slate-700 text-lg tracking-wider">
+                    {rooms.urbansea || "---"}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-10">
+          {itineraryData.map((day, index) => {
+            const dateInfo = tripDates[index];
+            return (
+              <div key={index} id={`day-${index}`} className="relative pt-2">
+                <div className="flex items-end gap-2 mb-4 ml-2">
+                  <span className="bg-sky-500 text-white text-xs font-extrabold px-3 py-1 rounded-full">
+                    {dateInfo.title}
+                  </span>
+                  <h2 className="text-xl font-extrabold text-slate-800">
+                    {dateInfo.realDate} {day.title}
+                  </h2>
+                </div>
+
+                <div className="relative border-l-2 border-sky-200 ml-5 pl-6 space-y-5">
+                  {day.items.map((item, idx) => (
+                    <div key={idx} className="relative">
+                      <div className="absolute -left-[31px] top-1 w-3 h-3 bg-white border-2 border-sky-300 rounded-full"></div>
+
+                      <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-3">
+                        <div className="flex gap-3 w-full">
+                          <div className="mt-0.5 p-2 bg-slate-50 rounded-xl shrink-0 h-fit">
+                            {getIcon(item.type)}
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-bold text-slate-800 text-[15px] flex items-center gap-2">
+                              {item.time && (
+                                <span className="text-sky-600 bg-sky-50 px-2 py-0.5 rounded-md text-xs">
+                                  {item.time}
+                                </span>
+                              )}
+                              {item.title}
+                            </p>
+                            <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                              {item.desc}
+                            </p>
+
+                            {item.options && (
+                              <button
+                                onClick={() =>
+                                  setSelectedOptions({
+                                    title: item.title,
+                                    options: item.options,
+                                    type: item.type,
+                                  })
+                                }
+                                className="w-full mt-3 bg-sky-50 hover:bg-sky-100 text-sky-600 font-bold py-2.5 rounded-xl text-sm transition-colors border border-sky-100 flex items-center justify-center gap-2 active:scale-95"
+                              >
+                                {getModalIcon(item.type, 14)}
+                                點擊查看 {item.options.length} 項內容
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 彈窗卡片 */}
+      {selectedOptions && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-4">
+          <div className="bg-white w-full max-w-md h-[85vh] sm:h-[80vh] rounded-t-[32px] sm:rounded-3xl p-5 flex flex-col shadow-2xl animate-in slide-in-from-bottom-10">
+            <div className="flex justify-between items-center pb-3 mb-2 border-b border-slate-100">
+              <h3 className="font-extrabold text-slate-800 text-lg flex items-center gap-2">
+                {getModalIcon(selectedOptions.type, 20)}
+                {selectedOptions.title}
+              </h3>
+              <button
+                onClick={() => setSelectedOptions(null)}
+                className="p-2 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full shadow-sm active:scale-95"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-4 pb-8 pr-1 hide-scrollbar mt-2">
+              {selectedOptions.options.map((opt, i) => (
+                <div
+                  key={i}
+                  className="bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-200"
+                >
+                  <div className="h-32 bg-slate-100 flex items-center justify-center relative">
+                    <span className="text-slate-400 text-sm font-bold flex flex-col items-center gap-2 opacity-50">
+                      {getModalIcon(selectedOptions.type, 24)}
+                      {selectedOptions.type === "food"
+                        ? "餐廳圖片或菜單"
+                        : "相關照片"}
+                    </span>
+                    <div className="absolute top-3 left-3 bg-white/90 px-3 py-1 rounded-lg text-xs font-extrabold text-slate-700 shadow-sm">
+                      NO.{i + 1}
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-bold text-slate-700 text-sm">
-                      <span className="text-sky-600 mr-2">{item.time}</span>
-                      {item.title}
+
+                  <div className="p-5">
+                    <h4 className="font-extrabold text-sky-800 text-base mb-2">
+                      {opt.name}
+                    </h4>
+                    {/* 使用 whitespace-pre-line 確保 \n 換行符號能正確顯示 */}
+                    <p className="text-sm text-slate-500 mb-5 leading-relaxed whitespace-pre-line">
+                      {opt.desc}
                     </p>
-                    <p className="text-xs text-slate-500 mt-0.5">{item.desc}</p>
+                    <a
+                      href={opt.map}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all"
+                    >
+                      <MapPin size={16} /> 開啟 Google Map
+                    </a>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
 
+// --- 會計、航班、優惠券模組保持不變 ---
 function AccountingView({
   expenses,
   currency,
@@ -533,13 +1080,15 @@ function AccountingView({
   setShowExpenseForm,
   expenseForm,
   setExpenseForm,
-  handleAddExpense,
+  handleSaveExpense,
   handleDeleteExpense,
   handleToggleSplitMember,
+  handleEditExpense,
+  handleCloseForm,
+  editingId,
 }) {
   const [view, setView] = useState("list");
 
-  // 自動結算核心邏輯
   const calculateSettlement = () => {
     let balances = {};
     FAMILY_MEMBERS.forEach((m) => (balances[m] = 0));
@@ -580,7 +1129,6 @@ function AccountingView({
 
   return (
     <div className="space-y-4">
-      {/* 切換 Tabs */}
       <div className="flex bg-slate-200/50 rounded-xl p-1 shadow-inner">
         <button
           onClick={() => setView("list")}
@@ -607,7 +1155,6 @@ function AccountingView({
             </button>
           </div>
 
-          {/* 花費列表 */}
           {expenses.length === 0 && (
             <p className="text-center text-slate-400 py-10">
               目前還沒有記帳紀錄喔！
@@ -625,7 +1172,7 @@ function AccountingView({
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
                     <span className="font-bold text-sky-600">{exp.payer}</span>{" "}
-                    先付 ➔ 分攤給: {exp.splitAmong.join(", ")}
+                    先付 ➔ 分攤: {exp.splitAmong.join(", ")}
                   </p>
                 </div>
                 <p className="font-extrabold text-rose-500 text-lg">
@@ -651,7 +1198,6 @@ function AccountingView({
             </div>
           ))}
 
-          {/* 新增按鈕 / 表單 */}
           {!showExpenseForm ? (
             <button
               onClick={() => setShowExpenseForm(true)}
@@ -665,12 +1211,13 @@ function AccountingView({
               className="bg-white p-5 rounded-2xl shadow-lg border border-sky-100 mt-4 space-y-4 animate-in slide-in-from-bottom-4"
             >
               <div className="flex justify-between items-center border-b pb-2">
-                <h3 className="font-bold text-slate-800">新增記帳</h3>
-                <button type="button" onClick={() => setShowExpenseForm(false)}>
+                <h3 className="font-bold text-slate-800">
+                  {editingId ? "編輯記帳" : "新增記帳"}
+                </h3>
+                <button type="button" onClick={handleCloseForm}>
                   <X size={20} className="text-slate-400" />
                 </button>
               </div>
-
               <div>
                 <label className="text-xs font-bold text-slate-500">
                   項目名稱
@@ -686,7 +1233,6 @@ function AccountingView({
                   placeholder="例如：晚餐烤肉"
                 />
               </div>
-
               <div>
                 <label className="text-xs font-bold text-slate-500">
                   金額 (日幣 ¥)
@@ -702,7 +1248,6 @@ function AccountingView({
                   placeholder="輸入日幣金額"
                 />
               </div>
-
               <div>
                 <label className="text-xs font-bold text-slate-500">
                   誰先付的？
@@ -721,7 +1266,6 @@ function AccountingView({
                   ))}
                 </select>
               </div>
-
               <div>
                 <label className="text-xs font-bold text-slate-500 mb-2 block">
                   這筆誰要分攤？
@@ -739,12 +1283,11 @@ function AccountingView({
                   ))}
                 </div>
               </div>
-
               <button
                 type="submit"
                 className="w-full bg-slate-800 text-white font-bold py-3.5 rounded-xl shadow-md mt-2 active:scale-95"
               >
-                儲存
+                {editingId ? "儲存修改" : "確認新增"}
               </button>
             </form>
           )}
@@ -757,7 +1300,6 @@ function AccountingView({
           <p className="text-xs text-slate-500">
             系統已自動計算抵銷，直接照下面轉帳即可：
           </p>
-
           {calculateSettlement().length === 0 ? (
             <p className="text-center text-slate-400 py-6">
               目前沒有人欠錢喔！
@@ -808,7 +1350,9 @@ function FlightsView() {
         <div className="absolute top-2 right-2 text-xs font-bold text-sky-600 bg-sky-100 px-2 py-1 rounded-md">
           去程 5/10
         </div>
-        <p className="text-sm font-bold text-slate-500 mb-2">樂桃航空 MM922</p>
+        <p className="text-sm font-bold text-slate-500 mb-2">
+          樂桃航空 (TPE → OKA)
+        </p>
         <div className="flex justify-between items-center mt-4">
           <div className="text-center">
             <p className="text-3xl font-extrabold text-slate-800">09:35</p>
@@ -817,7 +1361,7 @@ function FlightsView() {
             </p>
           </div>
           <div className="flex-1 px-4 flex flex-col items-center">
-            <p className="text-xs text-slate-400 mb-1">1h 45m</p>
+            <p className="text-xs text-slate-400 mb-1">2h 45m</p>
             <div className="w-full border-t-2 border-dashed border-slate-200 relative">
               <Plane
                 size={16}
@@ -838,16 +1382,18 @@ function FlightsView() {
         <div className="absolute top-2 right-2 text-xs font-bold text-rose-600 bg-rose-100 px-2 py-1 rounded-md">
           回程 5/15
         </div>
-        <p className="text-sm font-bold text-slate-500 mb-2">馬印航空 OD883</p>
+        <p className="text-sm font-bold text-slate-500 mb-2">
+          回程航班 (OKA → TPE)
+        </p>
         <div className="flex justify-between items-center mt-4">
           <div className="text-center">
-            <p className="text-3xl font-extrabold text-slate-800">16:10</p>
+            <p className="text-3xl font-extrabold text-slate-800">16:50</p>
             <p className="text-sm font-medium text-slate-500 mt-1">
               那霸 (OKA)
             </p>
           </div>
           <div className="flex-1 px-4 flex flex-col items-center">
-            <p className="text-xs text-slate-400 mb-1">1h 20m</p>
+            <p className="text-xs text-slate-400 mb-1">1h 40m</p>
             <div className="w-full border-t-2 border-dashed border-slate-200 relative">
               <Plane
                 size={16}
@@ -868,11 +1414,9 @@ function FlightsView() {
 }
 
 function CouponsView() {
-  // 將你提供的截圖資訊寫入資料，後續可以把圖片放到 public 資料夾中
   const coupons = [
     {
       name: "SUGI 杉藥局",
-      imgSrc: "/sugi.png", // 之後把截圖命名為 sugi.png 放到 public/
       thresholds: [
         { spend: "1萬~3萬", off: "免稅10% + 4% OFF" },
         { spend: "3萬~5萬", off: "免稅10% + 6% OFF" },
@@ -881,7 +1425,6 @@ function CouponsView() {
     },
     {
       name: "松本清 Matsumoto Kiyoshi",
-      imgSrc: "/matsumoto.png",
       thresholds: [
         { spend: "1萬~3萬", off: "3% OFF" },
         { spend: "3萬~5萬", off: "5% OFF" },
@@ -890,7 +1433,6 @@ function CouponsView() {
     },
     {
       name: "札幌藥妝 (北海道連鎖)",
-      imgSrc: "/sapporo.png",
       thresholds: [{ spend: "無門檻", off: "免稅 + 5% OFF" }],
     },
   ];
@@ -913,7 +1455,6 @@ function CouponsView() {
               點擊顯示條碼
             </span>
           </div>
-
           <div className="space-y-1.5 mb-4">
             {coupon.thresholds.map((t, i) => (
               <div
@@ -930,10 +1471,7 @@ function CouponsView() {
               </div>
             ))}
           </div>
-
-          {/* 模擬條碼區塊 (後續換成 img 標籤讀取你的截圖) */}
           <div className="w-full h-16 bg-slate-100 rounded-lg flex items-center justify-center border border-slate-200 border-dashed relative overflow-hidden">
-            {/* 如果有圖片就用這行：<img src={coupon.imgSrc} className="w-full h-full object-cover" /> */}
             <div className="flex gap-1 items-center opacity-30">
               <div className="w-1 h-10 bg-slate-800"></div>
               <div className="w-2 h-10 bg-slate-800"></div>
