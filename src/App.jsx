@@ -20,6 +20,7 @@ import {
   Building,
   Key,
   Info,
+  AlertCircle,
 } from "lucide-react";
 import { db } from "./services/firebase";
 import {
@@ -345,6 +346,9 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
   const [activeDay, setActiveDay] = useState(0);
   const [isEditingRooms, setIsEditingRooms] = useState(false);
 
+  // 新增：用來記錄目前要放大顯示的圖片 URL
+  const [zoomedImage, setZoomedImage] = useState(null);
+
   const tripDates = [
     {
       id: 0,
@@ -430,18 +434,19 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           options: [
             {
               name: "泊港漁市場",
-              desc: "推薦現切鮪魚。有代客料理+內用座位。",
+              desc: "推薦現切鮪魚。大國海產、中真水產有代客料理+內用座位。",
               map: "https://maps.google.com/?q=泊港漁市場",
             },
             {
               name: "A&W Makiminato",
-              desc: "停好車在車上點餐！推薦：麥根沙士、捲薯條。",
+              desc: "停好車在車上點餐！推薦：The A&W Burger、麥根沙士、捲薯條。",
               map: "https://maps.google.com/?q=A&W+Makiminato",
             },
             {
               name: "Tonkatsu Taro Chatan",
               desc: "25公分巨大炸蝦！",
               map: "https://maps.google.com/?q=Tonkatsu+Taro+Chatan",
+              img: "/food/FriedShrimp.png",
             },
           ],
         },
@@ -509,19 +514,28 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           desc: "點擊查看景點與美食",
           options: [
             {
-              name: "古宇利大橋 & 心型岩",
-              desc: "必拍絕美海景與心型礁岩。",
+              name: "古宇利大橋",
+              desc: "必拍絕美海景。",
+              map: "https://maps.app.goo.gl/y9uHJg2Kos4TC52P8",
+              img: "/kouriBridge.jpg",
+            },
+            {
+              name: "心型岩",
+              desc: "必拍心型礁岩。",
               map: "https://maps.google.com/?q=古宇利島心型岩",
+              img: "/heartRock.jpg",
             },
             {
               name: "KOURI SHRIMP (蝦蝦飯)",
               desc: "營業時間 11:00 - 16:00。古宇利島必吃夏威夷蒜香蝦蝦飯！",
               map: "https://maps.google.com/?q=KOURI+SHRIMP",
+              img: "/food/kouri-shrimp.jpg",
             },
             {
               name: "Shinmei Coffee",
-              desc: "營業時間 10:30 - 16:30。大推現刨黑糖飲料！",
+              desc: "營業時間 10:30 - 16:30。大推現刨生黑糖拿鐵，生黑糖珍珠鮮奶茶(這款甜一點)！",
               map: "https://maps.google.com/?q=Shinmei+Coffee",
+              note: "⚠️ 僅收現金或電子支付，不可刷信用卡",
             },
           ],
         },
@@ -533,7 +547,7 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
         },
         {
           type: "info",
-          time: "14:30",
+          time: "14:30 / 16:00",
           title: "🐬 海豚秀",
           desc: "在水族館戶外展區",
         },
@@ -574,23 +588,26 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           options: [
             {
               name: "港川外人住宅雞湯拉麵屋 いしぐふ",
-              desc: "初代沖繩麵王！",
+              desc: "初代沖繩麵王！招牌 Tokusen soba（綜合雞肉拉麵）,椒鹽雞肉/滷汁雞肉。\r\n套餐是多一小碗的飯（溫泉蛋拌飯、雞湯汁拌飯、烤雞肉拌飯三選一）",
               map: "https://maps.google.com/?q=いしぐふ+港川",
+              img: "/food/TokusenSoba.jpg",
             },
             {
               name: ".uki",
-              desc: "營業時間 7:00 - 17:00",
+              desc: "營業時間 7:00 - 17:00，杯測冠軍",
               map: "https://maps.google.com/?q=.uki+okinawa",
             },
             {
               name: "oHacorte 港川店",
-              desc: "超美特色水果塔",
+              desc: "超美特色水果塔，起司塔/草莓塔",
               map: "https://maps.google.com/?q=oHacorte+港川店",
+              img: "/food/cheeseTart.jpg",
             },
             {
               name: "Houki Boshi",
-              desc: "必買黑糖可麗露",
+              desc: "必買黑糖可麗露，黑糖星星餅乾",
               map: "https://maps.google.com/?q=Houki+Boshi",
+              img: "/food/brownSugarCookie.jpg",
             },
           ],
         },
@@ -610,6 +627,7 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
               name: "松原屋製菓",
               desc: "必買：沙翁 (沖繩傳統炸甜甜圈)，營業時間 09:00–18:00。",
               map: "https://maps.google.com/?q=松原屋製菓",
+              img: "/food/donut.jpg",
             },
             {
               name: "福助玉子燒",
@@ -618,17 +636,24 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
             },
             {
               name: "Mochi-no-mise Yamaya",
-              desc: "沖繩傳統麻糬專賣店。",
+              desc: "沖繩傳統麻糬專賣店，沖繩麻糬/沖繩草仔粿。",
               map: "https://maps.google.com/?q=Mochi-no-mise+Yamaya",
+              img: "/food/okinawamochi.jpg",
             },
             {
               name: "琉球牛乳餅",
-              desc: "必買人氣特色伴手禮。",
+              desc: "鮮奶麻糬（類似炸牛奶/蕨餅口感），特色口味包括原味、紫薯、紅糖。",
               map: "https://maps.google.com/?q=琉球牛乳餅",
+              img: "/food/milk_ricecake.jpg",
             },
             {
               name: "Hama Shokhuin",
               desc: "推薦：花生豆腐。",
+              map: "https://maps.google.com/?q=Hama+Shokhuin",
+            },
+            {
+              name: "Maxi Pudding",
+              desc: "推薦：茉莉花茶、沖繩咖啡、蔗糖口味的生布丁。\r\n以急速冷凍封存代替烘焙，做出如同奶昔般的口感。",
               map: "https://maps.google.com/?q=Hama+Shokhuin",
             },
             {
@@ -689,6 +714,25 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
               name: "波上宮參拜須知",
               desc: "還御守。御守授與時間為 9:00～17:00\n\n【淨化儀式：手水舍】\n參拜前，請先在入口處的「手水舍」進行淨手淨口：\n1. 用勺子舀水清洗左手、右手。\n2. 用左手漱口。\n3. 將勺子直立，讓剩餘的水流下清洗勺柄。\n\n【參拜流程】\n1. 投幣（5円）\n2. 搖鈴\n3. 二拜二拍（深深鞠躬兩次，拍手兩下，以示尊敬。）\n4. 合掌祈禱\n5. 一拜",
               map: "https://maps.google.com/?q=波上宮",
+            },
+          ],
+        },
+        {
+          type: "food",
+          time: "咖啡",
+          title: "參拜後咖啡休息",
+          desc: "點擊查看",
+          options: [
+            {
+              name: "TURNER COFFEE",
+              desc: "推薦：Oat Milk Latte (燕麥奶拿鐵)",
+              map: "https://maps.google.com/?q=TURNER+COFFEE",
+            },
+            {
+              name: "Aguro Baisen Coffee",
+              desc: "推薦：培根蛋吐司和冰咖啡套餐。",
+              map: "https://maps.google.com/?q=Aguro+Baisen+Coffee",
+              note: "⚠️ 此店家僅接受現金付款",
             },
           ],
         },
@@ -768,6 +812,7 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
               name: "傑克牛排館",
               desc: "營業時間 11:00 - 22:30 (星期三休息)。沖繩經典老字號美式牛排館。",
               map: "https://maps.google.com/?q=傑克牛排館",
+              img: "/food/jack-steak.jpg",
             },
           ],
         },
@@ -1031,14 +1076,23 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
                   key={i}
                   className="bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-200"
                 >
-                  <div className="h-32 bg-slate-100 flex items-center justify-center relative">
-                    <span className="text-slate-400 text-sm font-bold flex flex-col items-center gap-2 opacity-50">
-                      {getModalIcon(selectedOptions.type, 24)}
-                      {selectedOptions.type === "food"
-                        ? "餐廳圖片或菜單"
-                        : "相關照片"}
-                    </span>
-                    <div className="absolute top-3 left-3 bg-white/90 px-3 py-1 rounded-lg text-xs font-extrabold text-slate-700 shadow-sm">
+                  <div className="h-40 bg-slate-100 flex items-center justify-center relative overflow-hidden group">
+                    {opt.img ? (
+                      <img
+                        src={opt.img}
+                        alt={opt.name}
+                        className="w-full h-full object-cover cursor-zoom-in group-hover:scale-105 transition-transform duration-300"
+                        onClick={() => setZoomedImage(opt.img)}
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 opacity-40">
+                        {getModalIcon(selectedOptions.type, 24)}
+                        <span className="text-slate-400 text-sm font-bold">
+                          暫無相片
+                        </span>
+                      </div>
+                    )}
+                    <div className="absolute top-3 left-3 bg-white/90 px-3 py-1 rounded-lg text-xs font-extrabold text-slate-700 shadow-sm pointer-events-none">
                       NO.{i + 1}
                     </div>
                   </div>
@@ -1047,7 +1101,15 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
                     <h4 className="font-extrabold text-sky-800 text-base mb-2">
                       {opt.name}
                     </h4>
-                    {/* 使用 whitespace-pre-line 確保 \n 換行符號能正確顯示 */}
+
+                    {/* 獨立顯示的備註區塊 */}
+                    {opt.note && (
+                      <div className="mb-3 bg-rose-50 text-rose-600 text-xs font-bold px-3 py-2.5 rounded-lg border border-rose-100 flex items-start gap-1.5 leading-relaxed">
+                        <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                        <span>{opt.note}</span>
+                      </div>
+                    )}
+
                     <p className="text-sm text-slate-500 mb-5 leading-relaxed whitespace-pre-line">
                       {opt.desc}
                     </p>
@@ -1064,6 +1126,23 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 照片全螢幕放大 (Lightbox) */}
+      {zoomedImage && (
+        <div
+          className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4 cursor-zoom-out animate-in fade-in"
+          onClick={() => setZoomedImage(null)}
+        >
+          <button className="absolute top-6 right-4 sm:right-6 text-white/70 hover:text-white p-2">
+            <X size={32} />
+          </button>
+          <img
+            src={zoomedImage}
+            className="max-w-full max-h-full object-contain rounded-xl shadow-2xl"
+            alt="Fullscreen View"
+          />
         </div>
       )}
     </div>
@@ -1154,7 +1233,6 @@ function AccountingView({
               切換為 {currency === "JPY" ? "台幣 (TWD)" : "日幣 (JPY)"} 顯示
             </button>
           </div>
-
           {expenses.length === 0 && (
             <p className="text-center text-slate-400 py-10">
               目前還沒有記帳紀錄喔！
@@ -1417,6 +1495,7 @@ function CouponsView() {
   const coupons = [
     {
       name: "SUGI 杉藥局",
+      img: "/coupon/sugi.png",
       thresholds: [
         { spend: "1萬~3萬", off: "免稅10% + 4% OFF" },
         { spend: "3萬~5萬", off: "免稅10% + 6% OFF" },
@@ -1425,6 +1504,7 @@ function CouponsView() {
     },
     {
       name: "松本清 Matsumoto Kiyoshi",
+      img: "/coupon/matsumoto.png",
       thresholds: [
         { spend: "1萬~3萬", off: "3% OFF" },
         { spend: "3萬~5萬", off: "5% OFF" },
@@ -1433,6 +1513,7 @@ function CouponsView() {
     },
     {
       name: "札幌藥妝 (北海道連鎖)",
+      img: "/coupon/sapporo.png",
       thresholds: [{ spend: "無門檻", off: "免稅 + 5% OFF" }],
     },
   ];
@@ -1472,18 +1553,26 @@ function CouponsView() {
             ))}
           </div>
           <div className="w-full h-16 bg-slate-100 rounded-lg flex items-center justify-center border border-slate-200 border-dashed relative overflow-hidden">
-            <div className="flex gap-1 items-center opacity-30">
-              <div className="w-1 h-10 bg-slate-800"></div>
-              <div className="w-2 h-10 bg-slate-800"></div>
-              <div className="w-1 h-10 bg-slate-800"></div>
-              <div className="w-3 h-10 bg-slate-800"></div>
-              <span className="px-2 font-mono text-sm tracking-widest text-slate-800">
-                點擊顯示圖片
-              </span>
-              <div className="w-2 h-10 bg-slate-800"></div>
-              <div className="w-1 h-10 bg-slate-800"></div>
-              <div className="w-2 h-10 bg-slate-800"></div>
-            </div>
+            {coupon.img ? (
+              <img
+                src={coupon.img}
+                className="w-full h-full object-cover"
+                alt="coupon"
+              />
+            ) : (
+              <div className="flex gap-1 items-center opacity-30">
+                <div className="w-1 h-10 bg-slate-800"></div>
+                <div className="w-2 h-10 bg-slate-800"></div>
+                <div className="w-1 h-10 bg-slate-800"></div>
+                <div className="w-3 h-10 bg-slate-800"></div>
+                <span className="px-2 font-mono text-sm tracking-widest text-slate-800">
+                  點擊顯示圖片
+                </span>
+                <div className="w-2 h-10 bg-slate-800"></div>
+                <div className="w-1 h-10 bg-slate-800"></div>
+                <div className="w-2 h-10 bg-slate-800"></div>
+              </div>
+            )}
           </div>
         </div>
       ))}
