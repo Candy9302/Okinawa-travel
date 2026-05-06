@@ -476,6 +476,7 @@ function ItineraryView({
               name: "泊港漁市場",
               desc: "推薦現切鮪魚。大國海產、中真水產有代客料理+內用座位。",
               map: "https://maps.google.com/?q=泊港漁市場",
+              img: "/food/fishMarket.jpg",
             },
             {
               name: "A&W Makiminato",
@@ -1080,6 +1081,7 @@ function ItineraryView({
               name: "琉球新麵 通堂 (小祿本店)",
               desc: "營業時間 11:00–23:30\n\n🍜 男人麵：豚骨湯，味道濃郁偏重口味，圓細麵。\n🍜 女人麵：雞高湯，味道清爽偏輕淡口味，扁細麵。",
               map: "https://maps.google.com/?q=琉球新麵+通堂+小祿本店",
+              img: "/food/raman.jpg",
             },
           ],
         },
@@ -1088,6 +1090,7 @@ function ItineraryView({
           time: "13:30",
           title: "抵達租車公司還車",
           desc: "滿油還車、保留加油收據！最晚 15:30 前要還車。\n建議 13:30 到租車公司，最晚 13:50 到並等接駁去機場。\n最好是 14:00 前到機場！",
+          map: "https://maps.app.goo.gl/yDGYnMx9ZU6RXs8HA",
         },
         {
           type: "flight",
