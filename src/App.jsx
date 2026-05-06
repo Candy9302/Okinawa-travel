@@ -21,6 +21,7 @@ import {
   Key,
   Info,
   AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 import { db } from "./services/firebase";
 import {
@@ -30,6 +31,7 @@ import {
   deleteDoc,
   doc,
   updateDoc,
+  setDoc,
   query,
   orderBy,
 } from "firebase/firestore";
@@ -55,6 +57,12 @@ export default function OkinawaTravelApp() {
     return saved ? JSON.parse(saved) : { montpa: "", urbansea: "" };
   });
 
+  // 🚀 新增：電子門票使用狀態 State (存在 LocalStorage)
+  const [usedTickets, setUsedTickets] = useState(() => {
+    const saved = localStorage.getItem("okinawa_tickets");
+    return saved ? JSON.parse(saved) : {};
+  });
+
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [expenseForm, setExpenseForm] = useState({
     title: "",
@@ -66,6 +74,21 @@ export default function OkinawaTravelApp() {
   useEffect(() => {
     localStorage.setItem("okinawa_rooms", JSON.stringify(rooms));
   }, [rooms]);
+
+  // 🚀 新增：監聽門票狀態改變並存入 LocalStorage
+  useEffect(() => {
+    localStorage.setItem("okinawa_tickets", JSON.stringify(usedTickets));
+  }, [usedTickets]);
+
+  useEffect(() => {
+    const docRef = doc(db, "shared_data", "rooms");
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setRooms(docSnap.data());
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const q = query(collection(db, "expenses"), orderBy("createdAt", "desc"));
@@ -260,6 +283,8 @@ export default function OkinawaTravelApp() {
             getWeatherIcon={getWeatherIcon}
             rooms={rooms}
             setRooms={setRooms}
+            usedTickets={usedTickets}
+            setUsedTickets={setUsedTickets}
           />
         )}
         {activeTab === "accounting" && (
@@ -341,13 +366,28 @@ function NavItem({ icon, label, isActive, onClick }) {
 }
 
 // --- 行程畫面模組 ---
-function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
+function ItineraryView({
+  weatherData,
+  getWeatherIcon,
+  rooms,
+  setRooms,
+  usedTickets,
+  setUsedTickets,
+}) {
   const [selectedOptions, setSelectedOptions] = useState(null);
   const [activeDay, setActiveDay] = useState(0);
   const [isEditingRooms, setIsEditingRooms] = useState(false);
-
-  // 新增：用來記錄目前要放大顯示的圖片 URL
   const [zoomedImage, setZoomedImage] = useState(null);
+
+  const handleSaveRooms = async () => {
+    setIsEditingRooms(false);
+    try {
+      await setDoc(doc(db, "shared_data", "rooms"), rooms);
+    } catch (error) {
+      console.error("儲存房號失敗：", error);
+      alert("儲存房號失敗，請檢查網路連線。");
+    }
+  };
 
   const tripDates = [
     {
@@ -441,12 +481,13 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
               name: "A&W Makiminato",
               desc: "停好車在車上點餐！推薦：The A&W Burger、麥根沙士、捲薯條。",
               map: "https://maps.google.com/?q=A&W+Makiminato",
+              img: "/food/A&W.jpg",
             },
             {
-              name: "Tonkatsu Taro Chatan",
+              name: "Tonkatsu Taro Chatan Branch",
               desc: "25公分巨大炸蝦！",
               map: "https://maps.google.com/?q=Tonkatsu+Taro+Chatan",
-              img: "/food/FriedShrimp.png",
+              img: "/food/shrimp.jpg",
             },
           ],
         },
@@ -460,16 +501,19 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
               name: "Cheesus cafe",
               desc: "必吃熱騰騰烤起司三明治！",
               map: "https://maps.google.com/?q=Cheesus+cafe+北谷",
+              img: "/food/cheeseUs.jpg",
             },
             {
               name: "焼き芋 自動販売機",
               desc: "超特別！路邊熱騰騰烤地瓜自動販賣機",
               map: "https://maps.google.com/?q=北谷+烤地瓜販賣機",
+              img: "/food/atm.png",
             },
             {
               name: "GIGO 北谷",
               desc: "夾娃娃機、扭蛋天堂",
               map: "https://maps.google.com/?q=GIGO+北谷",
+              img: "/source/gigo.jpg",
             },
             {
               name: "Blue Seal (北谷店)",
@@ -485,14 +529,16 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           desc: "點擊查看選項",
           options: [
             {
-              name: "暖暮 北谷砂邊店",
-              desc: "經典沖繩拉麵",
-              map: "https://maps.google.com/?q=暖暮+北谷砂邊店",
+              name: "迴轉壽司市場 美浜店",
+              desc: "人氣平價迴轉壽司",
+              map: "https://maps.google.com/?q=迴轉壽司市場+美浜店",
+              img: "/food/cycleSushi.jpg",
             },
             {
               name: "歩炉 北谷店",
-              desc: "推薦：串燒、肥鮪魚捲、10塊烤肉拼盤",
+              desc: "營業 16:00–23:00。推薦：串燒、肥鮪魚捲、10塊烤肉拼盤",
               map: "https://maps.google.com/?q=歩炉+北谷店",
+              img: "/food/yakitori.png",
             },
           ],
         },
@@ -506,6 +552,24 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           time: "08:30",
           title: "出發前往北部",
           desc: "早點出發避車潮",
+        },
+        {
+          type: "food",
+          time: "上午",
+          title: "⭐ 許田休息站",
+          desc: "點擊查看必吃美食",
+          options: [
+            {
+              name: "許田休息站",
+              desc: "日本第一名道の駅！營業時間：08:30–19:00",
+              map: "https://maps.google.com/?q=許田休息站",
+            },
+            {
+              name: "琉球銘菓 三矢",
+              desc: "必吃：三矢本舖的沖繩傳統炸甜甜圈「沙翁」",
+              map: "https://maps.google.com/?q=琉球銘菓+三矢",
+            },
+          ],
         },
         {
           type: "spot",
@@ -533,7 +597,7 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
             },
             {
               name: "Shinmei Coffee",
-              desc: "營業時間 10:30 - 16:30。大推現刨生黑糖拿鐵，生黑糖珍珠鮮奶茶(這款甜一點)！",
+              desc: "營業時間 10:30 - 16:30。大推現刨生黑糖拿鐵，生黑糖珍珠鮮奶茶！",
               map: "https://maps.google.com/?q=Shinmei+Coffee",
               note: "⚠️ 僅收現金或電子支付，不可刷信用卡",
             },
@@ -544,6 +608,39 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           time: "13:00",
           title: "美麗海水族館",
           desc: "預計停留 1.5hr",
+          // 🚀 升級：加上 id 與 isTicket 屬性
+          options: [
+            {
+              name: "門票 - 爸爸",
+              img: "/tickets/ticket1.jpg",
+              id: "ticket-papa",
+              isTicket: true,
+            },
+            {
+              name: "門票 - 媽媽",
+              img: "/tickets/ticket1.jpg",
+              id: "ticket-mama",
+              isTicket: true,
+            },
+            {
+              name: "門票 - 妹妹",
+              img: "/tickets/ticket1.jpg",
+              id: "ticket-sister",
+              isTicket: true,
+            },
+            {
+              name: "門票 - 書瑋",
+              img: "/tickets/ticket1.jpg",
+              id: "ticket-shuwei",
+              isTicket: true,
+            },
+            {
+              name: "門票 - Candy",
+              img: "/tickets/ticket1.jpg",
+              id: "ticket-candy",
+              isTicket: true,
+            },
+          ],
         },
         {
           type: "info",
@@ -588,24 +685,39 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           options: [
             {
               name: "港川外人住宅雞湯拉麵屋 いしぐふ",
-              desc: "初代沖繩麵王！招牌 Tokusen soba（綜合雞肉拉麵）,椒鹽雞肉/滷汁雞肉。\r\n套餐是多一小碗的飯（溫泉蛋拌飯、雞湯汁拌飯、烤雞肉拌飯三選一）",
+              desc: "初代沖繩麵王！招牌 Tokusen soba（綜合雞肉拉麵）, 椒鹽雞肉/滷汁雞肉。\n套餐是多一小碗的飯（溫泉蛋拌飯、雞湯汁拌飯、烤雞肉拌飯三選一）",
               map: "https://maps.google.com/?q=いしぐふ+港川",
               img: "/food/TokusenSoba.jpg",
             },
             {
               name: ".uki",
-              desc: "營業時間 7:00 - 17:00，杯測冠軍",
+              desc: "營業時間 7:00 - 17:00，杯測冠軍！",
               map: "https://maps.google.com/?q=.uki+okinawa",
             },
             {
+              name: "A&W Makiminato",
+              desc: "路上經過，特色是停好車可以在車上點餐，店員會送來。",
+              map: "https://maps.google.com/?q=A&W+Makiminato",
+            },
+            {
+              name: "COCOROAR CAFE",
+              desc: "招牌甜點是使用「下川六〇酵素卵」與米粉製作的鬆餅。",
+              map: "https://maps.google.com/?q=COCOROAR+CAFE",
+            },
+            {
+              name: "Okinawa Cerrado Coffee",
+              desc: "超讚手沖咖啡",
+              map: "https://maps.google.com/?q=Okinawa+Cerrado+Coffee",
+            },
+            {
               name: "oHacorte 港川店",
-              desc: "超美特色水果塔，起司塔/草莓塔",
+              desc: "超美特色水果塔，起司塔/草莓塔。",
               map: "https://maps.google.com/?q=oHacorte+港川店",
               img: "/food/cheeseTart.jpg",
             },
             {
               name: "Houki Boshi",
-              desc: "必買黑糖可麗露，黑糖星星餅乾",
+              desc: "必買黑糖可麗露，黑糖星星餅乾。",
               map: "https://maps.google.com/?q=Houki+Boshi",
               img: "/food/brownSugarCookie.jpg",
             },
@@ -621,7 +733,7 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           type: "shopping",
           time: "下午",
           title: "國際通採買",
-          desc: "點擊查看必買伴手禮與地圖",
+          desc: "點擊查看必買伴手禮與點心",
           options: [
             {
               name: "松原屋製菓",
@@ -653,13 +765,28 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
             },
             {
               name: "Maxi Pudding",
-              desc: "推薦：茉莉花茶、沖繩咖啡、蔗糖口味的生布丁。\r\n以急速冷凍封存代替烘焙，做出如同奶昔般的口感。",
-              map: "https://maps.google.com/?q=Hama+Shokhuin",
+              desc: "推薦：茉莉花茶、沖繩咖啡、蔗糖口味的生布丁。\n以急速冷凍封存代替烘焙，做出如同奶昔般的口感。",
+              map: "https://maps.google.com/?q=Maxi+Pudding+那霸",
             },
             {
               name: "Jisakasu",
               desc: "充滿特色的在地二手小店。",
               map: "https://maps.google.com/?q=Jisakasu+okinawa",
+            },
+            {
+              name: "BURGER TIME",
+              desc: "BLT酪梨起司漢堡 推薦！",
+              map: "https://maps.google.com/?q=BURGER+TIME+那霸",
+            },
+            {
+              name: "Calbee+",
+              desc: "現炸薯條跟馬鈴薯吉拿棒",
+              map: "https://maps.google.com/?q=Calbee+那霸",
+            },
+            {
+              name: "風獅爺燒",
+              desc: "沖繩在地特色風獅爺雞蛋糕",
+              map: "https://maps.google.com/?q=風獅爺燒",
             },
           ],
         },
@@ -676,15 +803,20 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
             },
             {
               name: "Okiraku",
-              desc: "好吃的關東煮",
+              desc: "好吃的關東煮，類似居酒屋",
               map: "https://maps.google.com/?q=Okiraku+okinawa",
+            },
+            {
+              name: "鳥貴族",
+              desc: "營業時間 17:00–01:00。備案：高CP值串燒",
+              map: "https://maps.google.com/?q=鳥貴族+那霸",
             },
           ],
         },
       ],
     },
     {
-      title: "南部景點 + 神社",
+      title: "神社與市區採買",
       items: [
         {
           type: "food",
@@ -694,12 +826,12 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           options: [
             {
               name: "Marutama味噌飯屋",
-              desc: "160多年老店，推薦肉味增納豆。",
+              desc: "營業時間 07:30–10:00。160多年老店，推薦肉味增納豆/味增湯定食。",
               map: "https://maps.google.com/?q=Marutama味噌飯屋",
             },
             {
               name: "おにぎり屋 縁むすび",
-              desc: "日式飯糰",
+              desc: "營業時間 08:00–09:30。日式飯糰",
               map: "https://maps.google.com/?q=おにぎり屋+縁むすび",
             },
           ],
@@ -725,12 +857,12 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           options: [
             {
               name: "TURNER COFFEE",
-              desc: "推薦：Oat Milk Latte (燕麥奶拿鐵)",
+              desc: "營業時間 10:30–17:00。推薦：Oat Milk Latte (燕麥奶拿鐵)",
               map: "https://maps.google.com/?q=TURNER+COFFEE",
             },
             {
               name: "Aguro Baisen Coffee",
-              desc: "推薦：培根蛋吐司和冰咖啡套餐。",
+              desc: "營業時間 09:00–18:00。推薦：培根蛋吐司和冰咖啡套餐。",
               map: "https://maps.google.com/?q=Aguro+Baisen+Coffee",
               note: "⚠️ 此店家僅接受現金付款",
             },
@@ -739,14 +871,71 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
         {
           type: "spot",
           time: "下午",
-          title: "波之上海空公園 & 無印",
-          desc: "無印良品 那霸Main Place店",
+          title: "波之上海空公園 & 購物",
+          desc: "波之上海空公園、無印良品 那霸Main Place店、壺屋通\n第一牧志公設市場 (8:00~22:00) 大城屋",
+          options: [
+            {
+              name: "波之上海空公園",
+              desc: "在海邊放鬆散步，欣賞美麗海景。",
+              map: "https://maps.google.com/?q=波之上海空公園",
+            },
+            {
+              name: "無印良品 (那霸 Main Place店)",
+              desc: "大型購物商場內，好買好逛。",
+              map: "https://maps.google.com/?q=無印良品+那霸Main+Place",
+            },
+            {
+              name: "壺屋通",
+              desc: "沖繩傳統陶器街，很適合文青散步買紀念品。",
+              map: "https://maps.google.com/?q=壺屋通",
+            },
+            {
+              name: "第一牧志公設市場",
+              desc: "營業時間 8:00-22:00。沖繩的廚房，推薦尋找隱藏美味「大城屋」。",
+              map: "https://maps.google.com/?q=第一牧志公設市場",
+            },
+          ],
         },
         {
           type: "food",
-          time: "晚餐",
-          title: "燒肉 & 購物",
-          desc: "唐吉訶德那霸壺川店 (人少好逛)",
+          time: "17:00",
+          title: "晚餐：琉球之牛",
+          desc: "點擊查看訂位資訊與備註",
+          options: [
+            {
+              name: "琉球之牛",
+              desc: "牛舌推薦，可以直接點套餐。",
+              map: "https://maps.google.com/?q=琉球之牛+那霸",
+              note: "🚨 預約確認號碼：5C2H4G！遲到15分鐘會直接取消！",
+              img: "/food/kyuniku.jpg",
+            },
+          ],
+        },
+        {
+          type: "shopping",
+          title: "逛街",
+          desc: "點擊查看訂位資訊與備註",
+          options: [
+            {
+              name: "唐吉訶德",
+              desc: "牛舌推薦，可以直接點套餐。\n吃完後逛唐吉訶德 那霸壺川店 (人少走道寬好逛)\n\n🛒 伴手禮推薦：涼糖、乳液、Glico 醬油扇貝百力滋",
+              map: "https://maps.google.com/?q=琉球之牛+那霸",
+              coupon:
+                "https://japanportal.donki-global.com/coupon/cp001_zhtw.html",
+              buyList: [
+                {
+                  name: "VICKS 涼糖",
+                  img: "/source/vicks.jpg",
+                  alert: "檢查效期",
+                },
+                {
+                  name: "Glico 百力滋",
+                  desc: "日式醬油扇貝，阿瞳點心",
+                  img: "/shopping/pretz.jpg",
+                },
+              ],
+            },
+          ],
         },
       ],
     },
@@ -756,13 +945,33 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
         {
           type: "food",
           time: "07:00",
-          title: "早餐：Furinkazan 風林火山",
+          title: "早餐 2 選 1",
           desc: "點擊查看地圖",
           options: [
             {
               name: "Furinkazan 風林火山",
               desc: "營業時間 07:00–11:00 (周三公休)。日式特色早餐。",
               map: "https://maps.google.com/?q=風林火山+那霸",
+              img: "/food/furinkazhan.jpg",
+            },
+            {
+              name: "Haruchii",
+              desc: "特色肉卷飯糰",
+              map: "https://maps.google.com/?q=Haruchii+那霸",
+              img: "/food/haruchii.jpg",
+            },
+          ],
+        },
+        {
+          type: "spot",
+          time: "上午",
+          title: "首里城 行程",
+          desc: "點擊查看參觀路線",
+          options: [
+            {
+              name: "首里城公園",
+              desc: "門票：成人 400 日幣，6歲以下免費。\n\n【參觀重點路線】\n• 守禮門\n• 園比屋武御嶽石門 (國王祈願祭拜所)\n• 歡會門 (歡迎受邀前來的中國皇帝使節)\n• 瑞泉門\n• 首里杜館\n• 奉神門\n• 首里城正殿 (國家歷史遺址)\n• 東之物見台 (眺望風景的瞭望台)",
+              map: "https://maps.google.com/?q=首里城",
             },
           ],
         },
@@ -774,45 +983,71 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           options: [
             {
               name: "🐟 生食推薦菜單",
-              desc: "• 肥美赤甜蝦刺身(2尾) ¥380\n• 生食級生蠔佐醋醬(1個) ¥280\n• 增量漁師丼 OR 增量蔥鮪丼 ¥1,290\n• 定番海鮮丼(附醋飯) ¥1,080",
+              desc: "• 肥美赤甜蝦刺身(2尾) ¥380\n• 生食級生蠔佐醋醬(1個) ¥280\n• 增量漁師丼 OR 增量蔥鮪丼 (霸氣) ¥1,290\n• 定番海鮮丼(附醋飯)定食 只要 ¥1,080",
               map: "https://maps.google.com/?q=大ばんぶる舞",
             },
             {
               name: "🍤 熟食推薦菜單",
-              desc: "• 大ばんぶる舞鰻魚丼 約¥2,380\n• 炸蝦丼 (えびだけ丼)\n• 厚切炸竹筴魚定食\n• 煎魚定食 / 魚湯定食 (熱湯OK)\n• 鮪魚排咖哩",
+              desc: "• 大ばんぶる舞鰻魚丼 約¥2,380\n• 炸蝦丼 (えびだけ丼)\n• 厚切炸竹筴魚定食 (アジフライ定食)\n• 煎魚定食 (魚の煮付け / 焼き魚)\n• 魚湯定食 (船上の魚汁) 👉 熱湯，OK\n• 鮪魚排咖哩 (鮪カツカレー) 👉 熟炸",
               map: "https://maps.google.com/?q=大ばんぶる舞",
+              img: "/food/巨大鰻魚飯.jpg",
             },
           ],
         },
         {
           type: "shopping",
           time: "下午",
-          title: "市區逛街",
-          desc: "點擊查看店家資訊",
+          title: "市區逛街 & 瀨長島",
+          desc: "點擊查看行程選項",
           options: [
             {
               name: "hoppepan",
-              desc: "營業時間 10:00–19:00 (二,三休息)。必買：明太子法國麵包、炸蝦堡！",
+              desc: "營業 10:00–19:00 (二,三休息)。必買：明太子法國麵包、炸蝦堡！",
               map: "https://maps.google.com/?q=hoppepan",
             },
             {
-              name: "UNIQLO & 無印良品",
-              desc: "天久店或那霸Main Place店",
-              map: "https://maps.google.com/?q=無印良品+那霸",
+              name: "UNIQLO",
+              desc: "天久店 或 那霸店",
+              map: "https://maps.google.com/?q=UNIQLO+Ryubo+Ameku+Rakuichi",
+            },
+            {
+              name: "無印良品 (天久店)",
+              desc: "天久購物區的無印良品",
+              map: "https://maps.google.com/?q=無印良品+天久",
+            },
+            {
+              name: "無印良品 (Palette久茂地店)",
+              desc: "位於久茂地的無印良品分店",
+              map: "https://maps.google.com/?q=無印良品+Palette久茂地店",
+            },
+            {
+              name: "瀨長島 (沖繩小希臘)",
+              desc: "瀨長島海風露台、子寶岩、瀨長島日落公園、瀨長海灘",
+              map: "https://maps.google.com/?q=瀨長島",
             },
           ],
         },
         {
           type: "food",
           time: "晚餐",
-          title: "傑克牛排館 (Jack's Steak House)",
-          desc: "點擊查看地圖",
+          title: "晚餐選項",
+          desc: "點擊查看",
           options: [
             {
-              name: "傑克牛排館",
+              name: "傑克牛排館 (Jack's Steak House)",
               desc: "營業時間 11:00 - 22:30 (星期三休息)。沖繩經典老字號美式牛排館。",
               map: "https://maps.google.com/?q=傑克牛排館",
               img: "/food/jack-steak.jpg",
+            },
+            {
+              name: "賴長島 (海風露台)",
+              desc: "在瀨長島找間喜歡的異國料理看夜景吃晚餐",
+              map: "https://maps.google.com/?q=瀨長島海風露台",
+            },
+            {
+              name: "第一牧志公設市場",
+              desc: "營業時間 8:00~22:00。\n\n(註：步沙翁營業時間為 11:00–17:00，周三周日公休)",
+              map: "https://maps.google.com/?q=第一牧志公設市場",
             },
           ],
         },
@@ -829,8 +1064,9 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           options: [
             {
               name: "BOULANGERIE BZ",
-              desc: "營業時間 09:00–19:00。大推迷你可頌，必買外帶回台灣！",
+              desc: "營業時間 09:00–19:00。大推迷你可頌麵包，必買外帶回台！",
               map: "https://maps.google.com/?q=BOULANGERIE+BZ",
+              img: "/food/crossant.jpg",
             },
           ],
         },
@@ -851,13 +1087,13 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
           type: "spot",
           time: "13:30",
           title: "抵達租車公司還車",
-          desc: "滿油還車、保留加油收據！",
+          desc: "滿油還車、保留加油收據！最晚 15:30 前要還車。\n建議 13:30 到租車公司，最晚 13:50 到並等接駁去機場。\n最好是 14:00 前到機場！",
         },
         {
           type: "flight",
           time: "16:50",
           title: "那霸起飛 (OKA)",
-          desc: "17:30 抵達桃園",
+          desc: "17:30 抵達桃園 (TPE)",
         },
       ],
     },
@@ -931,7 +1167,13 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
               <Building size={20} className="text-slate-700" /> 住宿房號紀錄
             </h3>
             <button
-              onClick={() => setIsEditingRooms(!isEditingRooms)}
+              onClick={() => {
+                if (isEditingRooms) {
+                  handleSaveRooms();
+                } else {
+                  setIsEditingRooms(true);
+                }
+              }}
               className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-1.5 rounded-full text-sm font-bold flex items-center gap-1 active:scale-95 transition-transform"
             >
               <Edit2 size={14} /> {isEditingRooms ? "完成" : "編輯"}
@@ -1022,7 +1264,7 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
                               )}
                               {item.title}
                             </p>
-                            <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                            <p className="text-xs text-slate-500 mt-1.5 leading-relaxed whitespace-pre-line">
                               {item.desc}
                             </p>
 
@@ -1071,59 +1313,163 @@ function ItineraryView({ weatherData, getWeatherIcon, rooms, setRooms }) {
             </div>
 
             <div className="overflow-y-auto flex-1 space-y-4 pb-8 pr-1 hide-scrollbar mt-2">
-              {selectedOptions.options.map((opt, i) => (
-                <div
-                  key={i}
-                  className="bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-200"
-                >
-                  <div className="h-40 bg-slate-100 flex items-center justify-center relative overflow-hidden group">
-                    {opt.img ? (
-                      <img
-                        src={opt.img}
-                        alt={opt.name}
-                        className="w-full h-full object-cover cursor-zoom-in group-hover:scale-105 transition-transform duration-300"
-                        onClick={() => setZoomedImage(opt.img)}
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center gap-2 opacity-40">
-                        {getModalIcon(selectedOptions.type, 24)}
-                        <span className="text-slate-400 text-sm font-bold">
-                          暫無相片
-                        </span>
+              {selectedOptions.options.map((opt, i) => {
+                // 🚀 判斷這張卡片是不是電子門票，以及它的使用狀態
+                const isUsed = opt.isTicket && usedTickets[opt.id];
+
+                return (
+                  <div
+                    key={i}
+                    className="bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-200 flex flex-col"
+                  >
+                    {opt.img && (
+                      <div className="h-40 bg-slate-100 flex items-center justify-center relative overflow-hidden group shrink-0">
+                        <img
+                          src={opt.img}
+                          alt={opt.name}
+                          className={`w-full h-full object-cover cursor-zoom-in group-hover:scale-105 transition-transform duration-300 ${isUsed ? "grayscale opacity-30" : ""}`}
+                          onClick={() => setZoomedImage(opt.img)}
+                        />
+                        {/* 🚀 已使用印章效果 */}
+                        {isUsed && (
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                            <span className="bg-slate-800/80 text-white font-black tracking-widest text-3xl px-6 py-2 border-4 border-white/80 transform -rotate-12 rounded-lg backdrop-blur-sm shadow-xl">
+                              USED
+                            </span>
+                          </div>
+                        )}
+                        <div className="absolute top-3 left-3 bg-white/90 px-3 py-1 rounded-lg text-xs font-extrabold text-slate-700 shadow-sm pointer-events-none">
+                          NO.{i + 1}
+                        </div>
                       </div>
                     )}
-                    <div className="absolute top-3 left-3 bg-white/90 px-3 py-1 rounded-lg text-xs font-extrabold text-slate-700 shadow-sm pointer-events-none">
-                      NO.{i + 1}
+
+                    <div className="p-5 flex flex-col flex-1">
+                      <h4 className="font-extrabold text-sky-800 text-base mb-2 flex items-center gap-2">
+                        {!opt.img && (
+                          <span className="bg-sky-50 text-sky-600 px-2 py-0.5 rounded text-xs border border-sky-100 shadow-sm">
+                            NO.{i + 1}
+                          </span>
+                        )}
+                        {opt.name}
+                      </h4>
+
+                      {opt.note && (
+                        <div className="mb-3 bg-rose-50 text-rose-600 text-xs font-bold px-3 py-2.5 rounded-lg border border-rose-100 flex items-start gap-1.5 leading-relaxed">
+                          <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                          <span>{opt.note}</span>
+                        </div>
+                      )}
+
+                      {opt.desc && (
+                        <p className="text-sm text-slate-500 mb-4 leading-relaxed whitespace-pre-line">
+                          {opt.desc}
+                        </p>
+                      )}
+
+                      {opt.buyList && opt.buyList.length > 0 && (
+                        <div className="flex overflow-x-auto gap-3 pb-3 mb-2 hide-scrollbar">
+                          {opt.buyList.map((item, itemIdx) => (
+                            <div
+                              key={itemIdx}
+                              className="flex flex-col items-center w-[80px] shrink-0"
+                            >
+                              <div
+                                className="w-16 h-16 bg-white rounded-xl overflow-hidden mb-2 shadow-sm border border-slate-100 flex items-center justify-center cursor-zoom-in"
+                                onClick={() =>
+                                  item.img && setZoomedImage(item.img)
+                                }
+                              >
+                                {item.img ? (
+                                  <img
+                                    src={item.img}
+                                    className="w-full h-full object-cover"
+                                    alt={item.name}
+                                  />
+                                ) : (
+                                  <ShoppingBag
+                                    size={20}
+                                    className="text-slate-300"
+                                  />
+                                )}
+                              </div>
+                              <span className="text-[11px] font-bold text-slate-700 text-center leading-tight whitespace-pre-wrap">
+                                {item.name}
+                              </span>
+                              {item.desc && (
+                                <span className="text-[9px] text-slate-500 text-center leading-tight mt-0.5">
+                                  {item.desc}
+                                </span>
+                              )}
+                              {item.alert && (
+                                <span className="mt-1.5 bg-rose-50 text-rose-600 text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                                  <AlertCircle size={10} /> {item.alert}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="mt-auto pt-2">
+                        {/* 🚀 如果是電子門票，顯示切換使用狀態的專屬按鈕 */}
+                        {opt.isTicket ? (
+                          <button
+                            onClick={() =>
+                              setUsedTickets((prev) => ({
+                                ...prev,
+                                [opt.id]: !prev[opt.id],
+                              }))
+                            }
+                            className={`flex items-center justify-center gap-2 w-full text-sm font-bold py-3 rounded-xl shadow-sm active:scale-95 transition-all ${
+                              isUsed
+                                ? "bg-slate-100 text-slate-500 hover:bg-slate-200 border border-slate-200"
+                                : "bg-teal-500 hover:bg-teal-600 text-white shadow-md"
+                            }`}
+                          >
+                            {isUsed ? (
+                              "取消標記 (復原)"
+                            ) : (
+                              <>
+                                <CheckCircle2 size={16} />
+                                點擊標記為「已使用」
+                              </>
+                            )}
+                          </button>
+                        ) : opt.coupon ? (
+                          <div className="flex gap-2">
+                            <a
+                              href={opt.map}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-bold py-3 rounded-xl transition-colors border border-emerald-100 active:scale-95"
+                            >
+                              <MapPin size={16} /> 開啟地圖
+                            </a>
+                            <a
+                              href={opt.coupon}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex-1 flex items-center justify-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-sm font-bold py-3 rounded-xl transition-colors border border-rose-100 active:scale-95"
+                            >
+                              <Ticket size={16} /> 領取優惠券
+                            </a>
+                          </div>
+                        ) : opt.map ? (
+                          <a
+                            href={opt.map}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all"
+                          >
+                            <MapPin size={16} /> 開啟 Google Map
+                          </a>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
-
-                  <div className="p-5">
-                    <h4 className="font-extrabold text-sky-800 text-base mb-2">
-                      {opt.name}
-                    </h4>
-
-                    {/* 獨立顯示的備註區塊 */}
-                    {opt.note && (
-                      <div className="mb-3 bg-rose-50 text-rose-600 text-xs font-bold px-3 py-2.5 rounded-lg border border-rose-100 flex items-start gap-1.5 leading-relaxed">
-                        <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                        <span>{opt.note}</span>
-                      </div>
-                    )}
-
-                    <p className="text-sm text-slate-500 mb-5 leading-relaxed whitespace-pre-line">
-                      {opt.desc}
-                    </p>
-                    <a
-                      href={opt.map}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all"
-                    >
-                      <MapPin size={16} /> 開啟 Google Map
-                    </a>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1492,6 +1838,8 @@ function FlightsView() {
 }
 
 function CouponsView() {
+  const [zoomedCoupon, setZoomedCoupon] = useState(null);
+
   const coupons = [
     {
       name: "SUGI 杉藥局",
@@ -1526,7 +1874,7 @@ function CouponsView() {
       {coupons.map((coupon, idx) => (
         <div
           key={idx}
-          className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4 group cursor-pointer active:scale-[0.98] transition-transform"
+          className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4 group transition-transform"
         >
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-extrabold text-sky-800 text-lg">
@@ -1552,12 +1900,13 @@ function CouponsView() {
               </div>
             ))}
           </div>
-          <div className="w-full h-16 bg-slate-100 rounded-lg flex items-center justify-center border border-slate-200 border-dashed relative overflow-hidden">
+          <div className="w-full h-16 bg-slate-100 rounded-lg flex items-center justify-center border border-slate-200 border-dashed relative overflow-hidden group-hover:bg-slate-200 transition-colors cursor-zoom-in">
             {coupon.img ? (
               <img
                 src={coupon.img}
                 className="w-full h-full object-cover"
                 alt="coupon"
+                onClick={() => setZoomedCoupon(coupon.img)}
               />
             ) : (
               <div className="flex gap-1 items-center opacity-30">
@@ -1576,6 +1925,23 @@ function CouponsView() {
           </div>
         </div>
       ))}
+
+      {/* 優惠券全螢幕放大 (Lightbox) */}
+      {zoomedCoupon && (
+        <div
+          className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4 cursor-zoom-out animate-in fade-in"
+          onClick={() => setZoomedCoupon(null)}
+        >
+          <button className="absolute top-6 right-4 sm:right-6 text-white/70 hover:text-white p-2">
+            <X size={32} />
+          </button>
+          <img
+            src={zoomedCoupon}
+            className="max-w-full max-h-full object-contain rounded-xl shadow-2xl"
+            alt="Fullscreen Coupon"
+          />
+        </div>
+      )}
     </div>
   );
 }
