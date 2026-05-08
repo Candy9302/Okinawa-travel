@@ -22,6 +22,8 @@ import {
   Info,
   AlertCircle,
   CheckCircle2,
+  Sparkles,
+  Dices,
 } from "lucide-react";
 import { db } from "./services/firebase";
 import {
@@ -37,27 +39,53 @@ import {
 } from "firebase/firestore";
 
 const FAMILY_MEMBERS = ["爸爸", "媽媽", "妹妹", "書瑋", "我"];
+const SPONSOR_CANDIDATES = ["爸爸", "媽媽", "Candy", "書瑋"]; // 買單金主候選人
+const SECRET_REDEEM_CODE = "candy"; // 妹妹兌換獎品的專屬密碼
+
+// 判斷哪些獎品需要馬上抽金主
+const SPONSOR_KEYWORDS = [
+  "小零食基金",
+  "沖繩小物",
+  "全家飲料王",
+  "神秘扭蛋權",
+  "免單券",
+  "炸雞券",
+  "免費飲料券",
+];
+const needsSponsor = (prizeText) =>
+  SPONSOR_KEYWORDS.some((k) => prizeText.includes(k));
 
 export default function OkinawaTravelApp() {
   const [activeTab, setActiveTab] = useState("itinerary");
-  const [showBirthday, setShowBirthday] = useState(false);
   const [currency, setCurrency] = useState("JPY");
 
-  // API States
+  // 生日與特殊彩蛋狀態
+  const [showBirthday, setShowBirthday] = useState(false);
+  const [isBirthdayActive, setIsBirthdayActive] = useState(false); // 5/13 才為 true
+
+  // 🚀 自訂兌換密碼 Modal State
+  const [redeemState, setRedeemState] = useState({
+    isOpen: false,
+    prizeId: null,
+    code: "",
+  });
+
+  // API & 基礎 States
   const [exchangeRate, setExchangeRate] = useState(0.21);
   const [weatherData, setWeatherData] = useState({});
   const [editingId, setEditingId] = useState(null);
-
-  // 帳務 State
   const [expenses, setExpenses] = useState([]);
 
-  // 飯店房號 State
+  // Firebase: 妹妹的百寶袋 & 金主抽籤紀錄
+  const [sisterPrizes, setSisterPrizes] = useState([]);
+  const [showPrizeBag, setShowPrizeBag] = useState(false);
+  const [sponsorDraws, setSponsorDraws] = useState([]);
+
+  // 本機暫存: 飯店房號 & 門票
   const [rooms, setRooms] = useState(() => {
     const saved = localStorage.getItem("okinawa_rooms");
     return saved ? JSON.parse(saved) : { montpa: "", urbansea: "" };
   });
-
-  // 🚀 新增：電子門票使用狀態 State (存在 LocalStorage)
   const [usedTickets, setUsedTickets] = useState(() => {
     const saved = localStorage.getItem("okinawa_tickets");
     return saved ? JSON.parse(saved) : {};
@@ -71,21 +99,20 @@ export default function OkinawaTravelApp() {
     splitAmong: [...FAMILY_MEMBERS],
   });
 
+  // LocalStorage 同步
   useEffect(() => {
     localStorage.setItem("okinawa_rooms", JSON.stringify(rooms));
   }, [rooms]);
 
-  // 🚀 新增：監聽門票狀態改變並存入 LocalStorage
   useEffect(() => {
     localStorage.setItem("okinawa_tickets", JSON.stringify(usedTickets));
   }, [usedTickets]);
 
+  // Firebase 監聽器
   useEffect(() => {
     const docRef = doc(db, "shared_data", "rooms");
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setRooms(docSnap.data());
-      }
+      if (docSnap.exists()) setRooms(docSnap.data());
     });
     return () => unsubscribe();
   }, []);
@@ -93,15 +120,38 @@ export default function OkinawaTravelApp() {
   useEffect(() => {
     const q = query(collection(db, "expenses"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const expenseData = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setExpenses(expenseData);
+      setExpenses(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const q = query(
+      collection(db, "sister_prizes"),
+      orderBy("createdAt", "desc"),
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setSisterPrizes(
+        snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      );
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, "payer_draws"),
+      orderBy("createdAt", "desc"),
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setSponsorDraws(
+        snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      );
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 天氣與匯率 API
   useEffect(() => {
     fetch("https://api.exchangerate-api.com/v4/latest/JPY")
       .then((res) => res.json())
@@ -128,9 +178,11 @@ export default function OkinawaTravelApp() {
       .catch(console.error);
   }, []);
 
+  // 生日自動觸發判定 (嚴格鎖定 5/13)
   useEffect(() => {
     const today = new Date();
     if (today.getMonth() === 4 && today.getDate() === 13) {
+      setIsBirthdayActive(true);
       setShowBirthday(true);
     }
   }, []);
@@ -152,7 +204,6 @@ export default function OkinawaTravelApp() {
 
     const dataToSave = { ...expenseForm };
     const currentEditId = editingId;
-
     setShowExpenseForm(false);
     setEditingId(null);
     setExpenseForm({
@@ -164,8 +215,7 @@ export default function OkinawaTravelApp() {
 
     try {
       if (currentEditId) {
-        const docRef = doc(db, "expenses", currentEditId);
-        await updateDoc(docRef, {
+        await updateDoc(doc(db, "expenses", currentEditId), {
           ...dataToSave,
           amount: Number(dataToSave.amount),
         });
@@ -177,7 +227,6 @@ export default function OkinawaTravelApp() {
         });
       }
     } catch (error) {
-      console.error("寫入失敗：", error);
       alert(`Firebase 寫入失敗！\n錯誤訊息：${error.message}`);
     }
   };
@@ -195,11 +244,7 @@ export default function OkinawaTravelApp() {
 
   const handleDeleteExpense = async (id) => {
     if (window.confirm("確定要刪除這筆帳目嗎？")) {
-      try {
-        await deleteDoc(doc(db, "expenses", id));
-      } catch (error) {
-        alert(`刪除失敗：${error.message}`);
-      }
+      await deleteDoc(doc(db, "expenses", id));
     }
   };
 
@@ -210,6 +255,92 @@ export default function OkinawaTravelApp() {
         ? prev.splitAmong.filter((m) => m !== member)
         : [...prev.splitAmong, member],
     }));
+  };
+
+  // 自訂密碼兌換功能
+  const submitRedeemCode = async () => {
+    if (redeemState.code.toLowerCase() === SECRET_REDEEM_CODE.toLowerCase()) {
+      try {
+        await updateDoc(doc(db, "sister_prizes", redeemState.prizeId), {
+          status: "redeemed",
+        });
+        setRedeemState({ isOpen: false, prizeId: null, code: "" });
+      } catch (error) {
+        alert("更新失敗：" + error.message);
+      }
+    } else {
+      alert("❌ 密碼錯誤！休想偷換！請找 Candy 姊姊！");
+    }
+  };
+
+  // 金主抽籤邏輯 (支援聯動獎品與 3 種動畫效果)
+  const [sponsorDrawState, setSponsorDrawState] = useState({
+    isOpen: false,
+    isRolling: false,
+    name: "",
+    result: null,
+    pendingPrize: null,
+    drawType: "slot",
+  });
+
+  const startSponsorDraw = (pendingPrize = null) => {
+    const isPrizeObj = pendingPrize && pendingPrize.title;
+
+    const drawTypes = ["slot", "grid", "spotlight"];
+    const randomType = drawTypes[Math.floor(Math.random() * drawTypes.length)];
+
+    setSponsorDrawState({
+      isOpen: true,
+      isRolling: true,
+      name: SPONSOR_CANDIDATES[0],
+      result: null,
+      pendingPrize: isPrizeObj ? pendingPrize : null,
+      drawType: randomType,
+    });
+
+    let counter = 0;
+    const interval = setInterval(() => {
+      setSponsorDrawState((prev) => ({
+        ...prev,
+        name: SPONSOR_CANDIDATES[counter % SPONSOR_CANDIDATES.length],
+      }));
+      counter++;
+    }, 100);
+
+    setTimeout(async () => {
+      clearInterval(interval);
+      const winner =
+        SPONSOR_CANDIDATES[
+          Math.floor(Math.random() * SPONSOR_CANDIDATES.length)
+        ];
+
+      setSponsorDrawState((prev) => ({
+        ...prev,
+        isRolling: false,
+        name: winner,
+        result: winner,
+      }));
+
+      try {
+        await addDoc(collection(db, "payer_draws"), {
+          payer: winner,
+          createdAt: Date.now(),
+        });
+
+        if (isPrizeObj) {
+          await addDoc(collection(db, "sister_prizes"), {
+            title: pendingPrize.title,
+            desc: pendingPrize.desc,
+            prize: pendingPrize.prize,
+            sponsor: winner,
+            status: "available",
+            createdAt: Date.now(),
+          });
+        }
+      } catch (err) {
+        console.error("儲存失敗", err);
+      }
+    }, 3000);
   };
 
   const formatTWD = (jpy) =>
@@ -228,46 +359,369 @@ export default function OkinawaTravelApp() {
       <style>{`
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        .animate-float { animation: float 3s ease-in-out infinite; }
+        @keyframes shake-omikuji { 0%, 100% { transform: rotate(0deg) translateY(0); } 25% { transform: rotate(-15deg) translateY(-10px); } 50% { transform: rotate(15deg) translateY(5px); } 75% { transform: rotate(-15deg) translateY(-10px); } }
+        .animate-shake-omikuji { animation: shake-omikuji 0.15s ease-in-out infinite; }
+        @keyframes fall-stick { 0% { transform: translateY(-20px) rotate(180deg); opacity: 0; } 100% { transform: translateY(80px) rotate(180deg); opacity: 1; } }
+        .animate-fall-stick { animation: fall-stick 0.8s ease-out forwards; }
+        @keyframes fall-sakura { 0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; } 100% { transform: translateY(100vh) rotate(360deg); opacity: 0; } }
+        @keyframes slot-spin { 0% { transform: translateY(-100%); opacity: 0; } 50% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(100%); opacity: 0; } }
+        .animate-slot-spin { animation: slot-spin 0.1s linear infinite; }
       `}</style>
 
+      {/* 自訂密碼兌換 Modal */}
+      {redeemState.isOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            onClick={() =>
+              setRedeemState({ isOpen: false, prizeId: null, code: "" })
+            }
+          ></div>
+          <div className="bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
+              <h3 className="font-extrabold text-slate-800 text-lg flex items-center gap-2">
+                <Key size={18} className="text-rose-500" /> 輸入兌換密碼
+              </h3>
+              <button
+                onClick={() =>
+                  setRedeemState({ isOpen: false, prizeId: null, code: "" })
+                }
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-slate-500 mb-3 leading-relaxed">
+              請將手機交給{" "}
+              <span className="font-bold text-rose-500">Candy 姊姊</span>
+              ，由她為你輸入專屬的魔法密碼解鎖獎品！
+            </p>
+            <input
+              type="password"
+              value={redeemState.code}
+              onChange={(e) =>
+                setRedeemState({ ...redeemState, code: e.target.value })
+              }
+              className="w-full border-2 border-slate-200 p-3.5 rounded-xl mb-5 focus:border-rose-400 focus:ring-2 focus:ring-rose-100 outline-none text-center text-xl tracking-[0.5em] font-black text-slate-700"
+              placeholder="••••"
+              autoFocus
+            />
+            <button
+              onClick={submitRedeemCode}
+              className="w-full bg-gradient-to-r from-rose-400 to-pink-500 text-white font-bold py-3.5 rounded-xl shadow-md active:scale-95 transition-all"
+            >
+              確認兌換
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 妹妹生日驚喜卡片 */}
       {showBirthday && (
-        <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-8 text-center shadow-2xl relative animate-bounce">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"></div>
+          <div className="absolute top-0 left-0 w-full h-full opacity-60 bg-[radial-gradient(circle_at_50%_40%,_rgba(251,113,133,0.4),_transparent_70%)]"></div>
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {[...Array(12)].map((_, i) => (
+              <div
+                key={i}
+                className="absolute text-pink-300 opacity-70"
+                style={{
+                  top: `${Math.random() * -20}%`,
+                  left: `${Math.random() * 100}%`,
+                  animation: `fall-sakura ${Math.random() * 3 + 3}s linear infinite`,
+                  animationDelay: `${Math.random() * 2}s`,
+                  fontSize: `${Math.random() * 10 + 10}px`,
+                }}
+              >
+                🌸
+              </div>
+            ))}
+          </div>
+          <div className="relative w-[85%] max-w-sm bg-white/10 backdrop-blur-xl border border-white/40 rounded-[2.5rem] p-6 pb-8 shadow-[0_0_50px_rgba(244,63,94,0.3)] animate-in zoom-in-90 duration-500 flex flex-col items-center">
             <button
               onClick={() => setShowBirthday(false)}
-              className="absolute top-4 right-4 text-slate-400"
+              className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/20 p-2 rounded-full backdrop-blur-sm transition-all active:scale-90 z-10"
             >
-              <X size={24} />
+              <X size={20} />
             </button>
-            <Gift className="w-16 h-16 text-rose-400 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-slate-800 mb-2">
+            <div className="absolute -top-5 bg-gradient-to-r from-rose-400 to-pink-500 text-white font-black px-6 py-1.5 rounded-full shadow-lg border border-white/50 flex items-center gap-2 transform -rotate-3">
+              <Gift size={16} className="animate-pulse" />
+              <span className="tracking-wide">Surprise!</span>
+            </div>
+            <div className="w-40 h-40 mt-8 mb-6 relative animate-float">
+              <div className="absolute inset-0 bg-gradient-to-br from-yellow-200 to-amber-500 rounded-full blur-xl opacity-50"></div>
+              <div className="w-full h-full bg-white/20 rounded-full border-2 border-white/60 flex items-center justify-center shadow-inner backdrop-blur-md relative overflow-hidden text-5xl">
+                🐮🧳
+                <div className="absolute bottom-3 right-4 text-2xl animate-pulse">
+                  🌺
+                </div>
+                <div className="absolute top-3 left-3 text-2xl animate-bounce font-black text-rose-500">
+                  ♉
+                </div>
+              </div>
+            </div>
+            <h2 className="text-3xl font-extrabold text-white text-center mb-4 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] tracking-wide">
               生日快樂！妹妹 🎉
             </h2>
-            <p className="text-slate-600">在沖繩度過最棒的一天吧！</p>
+            <div className="bg-white/10 rounded-2xl p-4 px-6 border border-white/20 text-center w-full shadow-inner relative">
+              <span className="absolute -top-3 left-4 text-4xl text-rose-300 opacity-50 font-serif">
+                "
+              </span>
+              <p className="text-white/95 font-bold leading-relaxed text-[15px]">
+                在最美麗的沖繩海島
+                <br />
+                度過最棒的一天吧！
+              </p>
+              <div className="mt-3 text-rose-200 text-xs italic font-serif tracking-widest">
+                ~ Graceful Okinawa Trip ~
+              </div>
+            </div>
+            <button
+              onClick={() => setShowBirthday(false)}
+              className="mt-6 bg-gradient-to-r from-rose-400 to-pink-500 hover:from-rose-500 hover:to-pink-600 text-white font-bold w-full py-4 rounded-2xl shadow-[0_5px_20px_rgba(225,29,72,0.4)] active:scale-95 transition-all flex justify-center items-center gap-2 text-lg tracking-wide border border-white/20"
+            >
+              <Sun size={20} /> 展開今天的旅程
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 金主抽籤動畫 Modal (3種動畫效果切換) */}
+      {sponsorDrawState.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center shadow-[0_0_80px_rgba(251,191,36,0.3)] relative overflow-hidden">
+            {!sponsorDrawState.isRolling && (
+              <button
+                onClick={() =>
+                  setSponsorDrawState({
+                    isOpen: false,
+                    isRolling: false,
+                    name: "",
+                    result: null,
+                    pendingPrize: null,
+                  })
+                }
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full p-1.5 active:scale-90 z-20"
+              >
+                <X size={20} />
+              </button>
+            )}
+
+            <div className="text-5xl mb-6">💸</div>
+            <h2 className="text-xl font-extrabold text-slate-500 mb-6">
+              本次買單金主是...
+            </h2>
+
+            {/* 動畫類型 1：經典老虎機 (Slot) */}
+            {sponsorDrawState.drawType === "slot" && (
+              <div className="bg-slate-50 border-4 border-slate-800 rounded-2xl py-8 overflow-hidden relative shadow-inner mb-6">
+                {sponsorDrawState.isRolling ? (
+                  <div className="text-5xl font-black text-slate-800 tracking-widest animate-slot-spin absolute inset-0 flex items-center justify-center">
+                    {sponsorDrawState.name}
+                  </div>
+                ) : (
+                  <div className="text-5xl font-black text-amber-500 tracking-widest animate-in zoom-in-50 duration-500 drop-shadow-md">
+                    {sponsorDrawState.result}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 動畫類型 2：生死四宮格 (Grid) */}
+            {sponsorDrawState.drawType === "grid" && (
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                {SPONSOR_CANDIDATES.map((c) => (
+                  <div
+                    key={c}
+                    className={`py-6 rounded-2xl text-2xl font-black transition-all duration-75 flex items-center justify-center 
+                      ${
+                        sponsorDrawState.name === c
+                          ? "bg-amber-500 text-white scale-105 shadow-[0_10px_20px_rgba(245,158,11,0.4)] z-10"
+                          : "bg-slate-100 text-slate-300 scale-95"
+                      }`}
+                  >
+                    {c}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 動畫類型 3：心跳聚光燈 (Spotlight) */}
+            {sponsorDrawState.drawType === "spotlight" && (
+              <div className="flex justify-center items-center h-32 bg-slate-50 rounded-[2rem] border-4 border-slate-800 shadow-inner relative overflow-hidden mb-6">
+                {sponsorDrawState.isRolling ? (
+                  <div className="text-5xl font-black text-slate-800 tracking-widest animate-pulse scale-125 transition-transform duration-75">
+                    {sponsorDrawState.name}
+                  </div>
+                ) : (
+                  <div className="text-5xl font-black text-amber-500 tracking-widest animate-bounce drop-shadow-md">
+                    {sponsorDrawState.result}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {sponsorDrawState.result && (
+              <div className="mt-8 animate-in slide-in-from-bottom-4">
+                <p className="font-bold text-slate-600 text-lg mb-2">
+                  恭喜{" "}
+                  <span className="text-amber-500 font-black">
+                    {sponsorDrawState.result}
+                  </span>{" "}
+                  🎉
+                </p>
+                <p className="text-xs text-slate-400">
+                  {sponsorDrawState.pendingPrize
+                    ? "已連同獎品一起存入百寶袋！"
+                    : "系統已自動記錄至金主光榮榜"}
+                </p>
+                <button
+                  onClick={() =>
+                    setSponsorDrawState({
+                      isOpen: false,
+                      isRolling: false,
+                      name: "",
+                      result: null,
+                      pendingPrize: null,
+                    })
+                  }
+                  className="mt-6 w-full bg-slate-800 text-white font-bold py-3.5 rounded-xl shadow-md active:scale-95"
+                >
+                  感謝乾爹 / 乾媽！
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 妹妹的百寶袋 Modal */}
+      {showPrizeBag && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[90] flex items-center justify-center p-4">
+          <div className="bg-[#fcfbf7] rounded-[2rem] w-full max-w-md h-[80vh] flex flex-col shadow-2xl overflow-hidden animate-in slide-in-from-bottom-8">
+            <div className="bg-gradient-to-r from-rose-400 to-pink-500 p-5 pb-6 text-white relative">
+              <button
+                onClick={() => setShowPrizeBag(false)}
+                className="absolute top-5 right-5 text-white/80 hover:text-white bg-black/10 rounded-full p-1.5 active:scale-90"
+              >
+                <X size={20} />
+              </button>
+              <h2 className="text-2xl font-black flex items-center gap-2">
+                <Gift size={24} /> 妹妹的百寶袋
+              </h2>
+              <p className="text-rose-100 text-sm mt-1">
+                專屬生日大獎都在這裡！找 Candy 兌換吧！
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 hide-scrollbar">
+              {sisterPrizes.length === 0 ? (
+                <div className="text-center text-slate-400 mt-10 font-bold">
+                  目前空空如也，趕快去波上宮抽籤吧！
+                </div>
+              ) : (
+                sisterPrizes.map((prize) => (
+                  <div
+                    key={prize.id}
+                    className={`p-4 rounded-2xl border-2 transition-all ${prize.status === "redeemed" ? "bg-slate-50 border-slate-200 grayscale opacity-60" : "bg-white border-rose-200 shadow-sm"}`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="font-extrabold text-slate-800 text-lg">
+                        {prize.title}
+                      </h3>
+                      {prize.status === "redeemed" ? (
+                        <span className="bg-slate-200 text-slate-500 text-xs font-bold px-2 py-1 rounded-md">
+                          已使用
+                        </span>
+                      ) : (
+                        <span className="bg-rose-100 text-rose-600 text-xs font-bold px-2 py-1 rounded-md animate-pulse">
+                          可兌換
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-bold text-rose-500 mb-2 leading-relaxed flex items-center flex-wrap gap-2">
+                      {prize.prize}
+                      {/* 顯示被抽中的金主 */}
+                      {prize.sponsor && (
+                        <span className="bg-amber-100 text-amber-700 text-xs px-2 py-1 rounded-md border border-amber-200 shrink-0">
+                          付款金主：{prize.sponsor}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mb-4">{prize.desc}</p>
+
+                    {prize.status !== "redeemed" && (
+                      <button
+                        onClick={() =>
+                          setRedeemState({
+                            isOpen: true,
+                            prizeId: prize.id,
+                            code: "",
+                          })
+                        }
+                        className="w-full bg-slate-800 text-white font-bold py-2.5 rounded-xl shadow-md active:scale-95 text-sm"
+                      >
+                        👉 找 Candy 兌換
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}
 
       <header className="bg-gradient-to-r from-[#93C5FD] to-[#A5F3FC] p-5 rounded-b-3xl shadow-sm sticky top-0 z-40">
         <div className="flex justify-between items-center text-slate-800">
-          <div>
-            <h1 className="text-xl font-extrabold tracking-wider">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-extrabold tracking-wider flex items-center gap-1.5">
               🌺 沖繩家族旅行
+              {/* 測試按鈕：隨時解鎖 5/13 的生日與百寶袋權限 */}
+              <button
+                onClick={() => {
+                  setIsBirthdayActive(true);
+                  setShowBirthday(true);
+                }}
+                className="bg-white/30 hover:bg-white/50 p-1.5 rounded-full backdrop-blur-sm transition-colors active:scale-90"
+                title="測試生日彩蛋"
+              >
+                <Gift size={14} className="text-rose-500" />
+              </button>
             </h1>
-            <p className="text-sm font-medium opacity-90">5/10 - 5/15</p>
           </div>
-          <div
-            onClick={() => setActiveTab("accounting")}
-            className="bg-white/40 backdrop-blur-md px-3 py-2 rounded-2xl flex items-center gap-2 cursor-pointer border border-white/50 shadow-sm"
-          >
-            <PiggyBank size={24} className="text-amber-500" />
-            <div className="text-right">
-              <p className="text-[10px] font-bold text-slate-600">總花費</p>
-              <p className="font-extrabold text-sm">
-                {currency === "JPY"
-                  ? `¥ ${totalPublicSpent.toLocaleString()}`
-                  : formatTWD(totalPublicSpent)}
-              </p>
+
+          <div className="flex gap-2">
+            {/* 百寶袋入口 (僅生日當天或按下測試按鈕後顯示) */}
+            {isBirthdayActive && (
+              <button
+                onClick={() => setShowPrizeBag(true)}
+                className="bg-rose-500 text-white p-2 rounded-xl shadow-md active:scale-95 flex items-center justify-center relative"
+              >
+                <Gift size={20} />
+                {sisterPrizes.filter((p) => p.status === "available").length >
+                  0 && (
+                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full border-2 border-rose-500 animate-ping"></span>
+                )}
+              </button>
+            )}
+
+            <div
+              onClick={() => setActiveTab("accounting")}
+              className="bg-white/40 backdrop-blur-md px-3 py-2 rounded-xl flex items-center gap-2 cursor-pointer border border-white/50 shadow-sm active:scale-95"
+            >
+              <PiggyBank size={20} className="text-amber-500" />
+              <div className="text-right">
+                <p className="text-[9px] font-bold text-slate-600">總花費</p>
+                <p className="font-extrabold text-sm">
+                  {currency === "JPY"
+                    ? `¥${totalPublicSpent.toLocaleString()}`
+                    : formatTWD(totalPublicSpent)}
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -285,6 +739,9 @@ export default function OkinawaTravelApp() {
             setRooms={setRooms}
             usedTickets={usedTickets}
             setUsedTickets={setUsedTickets}
+            startSponsorDraw={startSponsorDraw}
+            isBirthdayActive={isBirthdayActive}
+            sisterPrizes={sisterPrizes}
           />
         )}
         {activeTab === "accounting" && (
@@ -304,6 +761,8 @@ export default function OkinawaTravelApp() {
               handleEditExpense={handleEditExpense}
               handleCloseForm={handleCloseForm}
               editingId={editingId}
+              sponsorDraws={sponsorDraws}
+              startSponsorDraw={startSponsorDraw}
             />
           </div>
         )}
@@ -312,9 +771,9 @@ export default function OkinawaTravelApp() {
             <FlightsView />
           </div>
         )}
-        {activeTab === "coupons" && (
+        {activeTab === "shopping" && (
           <div className="p-4">
-            <CouponsView />
+            <ShoppingView />
           </div>
         )}
       </main>
@@ -333,10 +792,10 @@ export default function OkinawaTravelApp() {
           onClick={() => setActiveTab("accounting")}
         />
         <NavItem
-          icon={<Ticket />}
-          label="優惠券"
-          isActive={activeTab === "coupons"}
-          onClick={() => setActiveTab("coupons")}
+          icon={<ShoppingBag />}
+          label="購物優惠"
+          isActive={activeTab === "shopping"}
+          onClick={() => setActiveTab("shopping")}
         />
         <NavItem
           icon={<Plane />}
@@ -373,21 +832,137 @@ function ItineraryView({
   setRooms,
   usedTickets,
   setUsedTickets,
+  startSponsorDraw,
+  isBirthdayActive,
+  sisterPrizes,
 }) {
   const [selectedOptions, setSelectedOptions] = useState(null);
   const [activeDay, setActiveDay] = useState(0);
   const [isEditingRooms, setIsEditingRooms] = useState(false);
   const [zoomedImage, setZoomedImage] = useState(null);
 
+  const [omikujiState, setOmikujiState] = useState({
+    isOpen: false,
+    step: null,
+    result: null,
+  });
+
+  const OMIKUJI_POOL = {
+    大吉: {
+      title: "🌸 大吉 🌸",
+      color: "text-rose-500",
+      bg: "from-rose-50 to-rose-100 border-rose-300",
+      desc: "「恭喜成為本次沖繩財運之神！」",
+      prizes: [
+        "🎉 下一餐免單券 (請大聲呼叫本團金主買單)",
+        "🍣 壽司自由點一盤 (可指定一盤高級壽司，大家不能阻止你)",
+        "🧋 全家飲料王 (全員飲料由一位幸運金主贊助)",
+        "🎁 神秘扭蛋權 (可指定任何一位家人幫你買一個扭蛋)",
+        "💴 ¥1600 旅遊基金 (一人400元，旅途中可直接使用)",
+        "👑 壽星神權 (今天任何人不能拒絕你的一次要求)",
+      ],
+    },
+    中吉: {
+      title: "✨ 中吉 ✨",
+      color: "text-orange-500",
+      bg: "from-orange-50 to-orange-100 border-orange-300",
+      desc: "運氣很不錯喔！開心出遊最重要！",
+      prizes: [
+        "🍗 獲得 LAWSON 炸雞券一份",
+        "📸 指定拍照權 (可以指定全家配合拍一張奇怪姿勢照片)",
+        "🛍️ 便利商店零食券 ¥300",
+        "☕ 免費飲料券 (飲料免費一杯)",
+        "🧸 沖繩小物 ¥300 (今天看到喜歡的都買，不准阻止)",
+      ],
+    },
+    小吉: {
+      title: "🍀 小吉 🍀",
+      color: "text-teal-500",
+      bg: "from-teal-50 to-teal-100 border-teal-300",
+      desc: "充滿小確幸的一天！",
+      prizes: [
+        "🍫 小零食基金 ¥100",
+        "📷 擔任今日幸運攝影師 (負責幫大家拍好看的照片)",
+        "🫶 獲得全家稱讚一次 (大家必須誇你一句)",
+        "🍬 糖果 / 軟糖隨機獎勵一份",
+        "✨ 今日運氣加成 (下次抽籤可重抽一次)",
+      ],
+    },
+    隱藏彩蛋: {
+      title: "🤣 隱藏彩蛋 🤣",
+      color: "text-purple-600",
+      bg: "from-purple-50 to-purple-100 border-purple-300",
+      desc: "這才是旅程最棒的回憶 (大凶1%)",
+      prizes: [
+        "💀 今天負責導航 (但其實導航超容易迷路)",
+        "🦁 沖繩獅子守護者 (必須跟一隻風獅爺合照)",
+        "👯 全家指定 pose 拍照 (抽到的人要負責設計 pose)",
+      ],
+    },
+  };
+
+  const drawOmikuji = () => {
+    setOmikujiState({ isOpen: true, step: "shaking", result: null });
+
+    let roll = Math.random() * 100;
+    let rank = roll < 50 ? "大吉" : roll < 85 ? "中吉" : "小吉";
+
+    let availablePrizes = [...OMIKUJI_POOL[rank].prizes];
+    if (rank === "大吉") {
+      const has1600Won = sisterPrizes.some(
+        (p) => p.prize && p.prize.includes("¥1600 旅遊基金"),
+      );
+      if (has1600Won) {
+        availablePrizes = availablePrizes.filter(
+          (p) => !p.includes("¥1600 旅遊基金"),
+        );
+      }
+    }
+
+    const prize =
+      availablePrizes[Math.floor(Math.random() * availablePrizes.length)];
+    const resultObj = { ...OMIKUJI_POOL[rank], prize };
+
+    setTimeout(() => {
+      setOmikujiState((prev) => ({ ...prev, step: "falling" }));
+      setTimeout(() => {
+        setOmikujiState((prev) => ({
+          ...prev,
+          step: "result",
+          result: resultObj,
+        }));
+      }, 1200);
+    }, 1500);
+  };
+
+  const handleAcceptPrize = async () => {
+    try {
+      await addDoc(collection(db, "sister_prizes"), {
+        title: omikujiState.result.title,
+        desc: omikujiState.result.desc,
+        prize: omikujiState.result.prize,
+        status: "available",
+        createdAt: Date.now(),
+      });
+      setOmikujiState({ isOpen: false, step: null, result: null });
+    } catch (err) {
+      alert("儲存失敗：" + err.message);
+    }
+  };
+
   const handleSaveRooms = async () => {
     setIsEditingRooms(false);
     try {
       await setDoc(doc(db, "shared_data", "rooms"), rooms);
     } catch (error) {
-      console.error("儲存房號失敗：", error);
       alert("儲存房號失敗，請檢查網路連線。");
     }
   };
+
+  // 🚀 核心日期檢查邏輯：5月11日才解鎖門票，或啟用測試模式時解鎖
+  const today = new Date();
+  const isTicketUnlockDay =
+    (today.getMonth() === 4 && today.getDate() === 11) || isBirthdayActive;
 
   const tripDates = [
     {
@@ -605,49 +1180,67 @@ function ItineraryView({
           ],
         },
         {
-          type: "spot",
+          type: "info",
           time: "13:00",
           title: "美麗海水族館",
-          desc: "預計停留 1.5hr",
-          // 🚀 升級：加上 id 與 isTicket 屬性
+          desc: "園區詳細資訊與電子門票",
           options: [
             {
-              name: "門票 - 爸爸",
-              img: "/tickets/ticket1.jpg",
+              name: "🚗 停車場資訊",
+              desc: "園內 9 個停車場皆免費！\n優先尋找「大型停車場」停放。",
+              img: "/source/aquarium.png",
+            },
+            {
+              name: "🎫 入場電子門票 - 爸爸",
+              desc: "請準備好手機刷 QR Code 入場。",
+              isTicket: true,
               id: "ticket-papa",
-              isTicket: true,
+              img: "/tickets/ticket1.jpg",
             },
             {
-              name: "門票 - 媽媽",
-              img: "/tickets/ticket1.jpg",
+              name: "🎫 入場電子門票 - 媽媽",
+              desc: "請準備好手機刷 QR Code 入場。",
+              isTicket: true,
               id: "ticket-mama",
-              isTicket: true,
+              img: "/tickets/ticket2.jpg",
             },
             {
-              name: "門票 - 妹妹",
-              img: "/tickets/ticket1.jpg",
+              name: "🎫 入場電子門票 - 妹妹",
+              desc: "請準備好手機刷 QR Code 入場。",
+              isTicket: true,
               id: "ticket-sister",
-              isTicket: true,
+              img: "/tickets/ticket3.jpg",
             },
             {
-              name: "門票 - 書瑋",
-              img: "/tickets/ticket1.jpg",
+              name: "🎫 入場電子門票 - 書瑋",
+              desc: "請準備好手機刷 QR Code 入場。",
+              isTicket: true,
               id: "ticket-shuwei",
-              isTicket: true,
+              img: "/tickets/ticket4.jpg",
             },
             {
-              name: "門票 - Candy",
-              img: "/tickets/ticket1.jpg",
-              id: "ticket-candy",
+              name: "🎫 入場電子門票 - Candy",
+              desc: "請準備好手機刷 QR Code 入場。",
               isTicket: true,
+              id: "ticket-candy",
+              img: "/tickets/ticket5.jpg",
+            },
+            {
+              name: "🐬 海豚秀時間表 (戶外展區)",
+              desc: "表演時間：\n10:30 / 11:30 / 13:00 / 14:30 / 16:00 / 17:00",
+              note: "建議提前 15 分鐘去卡位！",
+            },
+            {
+              name: "🐟 海豚餵食體驗 (海豚館)",
+              desc: "體驗費用：500日圓 / 1份\n付款方式：僅接受信用卡\n\n【每日場次】\n① 10:00～10:30\n② 11:00～11:30\n③ 12:00～12:30\n④ 13:30～14:00\n⑤ 15:30～16:00",
+              note: "※ 每人最多限購 5 份",
+            },
+            {
+              name: "🐋 黑潮之海 鯨鯊餵食秀",
+              desc: "表演時間：\n15:00 / 17:00",
+              note: "在室內的主水槽區",
             },
           ],
-        },
-        {
-          type: "info",
-          time: "14:30 / 16:00",
-          title: "🐬 海豚秀",
-          desc: "在水族館戶外展區",
         },
         {
           type: "spot",
@@ -847,6 +1440,7 @@ function ItineraryView({
               name: "波上宮參拜須知",
               desc: "還御守。御守授與時間為 9:00～17:00\n\n【淨化儀式：手水舍】\n參拜前，請先在入口處的「手水舍」進行淨手淨口：\n1. 用勺子舀水清洗左手、右手。\n2. 用左手漱口。\n3. 將勺子直立，讓剩餘的水流下清洗勺柄。\n\n【參拜流程】\n1. 投幣（5円）\n2. 搖鈴\n3. 二拜二拍（深深鞠躬兩次，拍手兩下，以示尊敬。）\n4. 合掌祈禱\n5. 一拜",
               map: "https://maps.google.com/?q=波上宮",
+              isOmikuji: true,
             },
           ],
         },
@@ -904,37 +1498,10 @@ function ItineraryView({
           desc: "點擊查看訂位資訊與備註",
           options: [
             {
-              name: "琉球之牛",
-              desc: "牛舌推薦，可以直接點套餐。",
+              name: "琉球之牛 & 唐吉訶德",
+              desc: "牛舌推薦，可以直接點套餐。\n吃完後逛唐吉訶德 那霸壺川店 (人少走道寬好逛)\n\n🛒 伴手禮推薦：請至「購物優惠」頁面查看願望清單！",
               map: "https://maps.google.com/?q=琉球之牛+那霸",
               note: "🚨 預約確認號碼：5C2H4G！遲到15分鐘會直接取消！",
-              img: "/food/kyuniku.jpg",
-            },
-          ],
-        },
-        {
-          type: "shopping",
-          title: "逛街",
-          desc: "點擊查看訂位資訊與備註",
-          options: [
-            {
-              name: "唐吉訶德",
-              desc: "牛舌推薦，可以直接點套餐。\n吃完後逛唐吉訶德 那霸壺川店 (人少走道寬好逛)\n\n🛒 伴手禮推薦：涼糖、乳液、Glico 醬油扇貝百力滋",
-              map: "https://maps.google.com/?q=琉球之牛+那霸",
-              coupon:
-                "https://japanportal.donki-global.com/coupon/cp001_zhtw.html",
-              buyList: [
-                {
-                  name: "VICKS 涼糖",
-                  img: "/source/vicks.jpg",
-                  alert: "檢查效期",
-                },
-                {
-                  name: "Glico 百力滋",
-                  desc: "日式醬油扇貝，阿瞳點心",
-                  img: "/shopping/pretz.jpg",
-                },
-              ],
             },
           ],
         },
@@ -1081,7 +1648,6 @@ function ItineraryView({
               name: "琉球新麵 通堂 (小祿本店)",
               desc: "營業時間 11:00–23:30\n\n🍜 男人麵：豚骨湯，味道濃郁偏重口味，圓細麵。\n🍜 女人麵：雞高湯，味道清爽偏輕淡口味，扁細麵。",
               map: "https://maps.google.com/?q=琉球新麵+通堂+小祿本店",
-              img: "/food/raman.jpg",
             },
           ],
         },
@@ -1090,7 +1656,6 @@ function ItineraryView({
           time: "13:30",
           title: "抵達租車公司還車",
           desc: "滿油還車、保留加油收據！最晚 15:30 前要還車。\n建議 13:30 到租車公司，最晚 13:50 到並等接駁去機場。\n最好是 14:00 前到機場！",
-          map: "https://maps.app.goo.gl/yDGYnMx9ZU6RXs8HA",
         },
         {
           type: "flight",
@@ -1140,8 +1705,7 @@ function ItineraryView({
               <div
                 key={i}
                 onClick={() => scrollToDay(i)}
-                className={`min-w-[85px] snap-start cursor-pointer rounded-[20px] py-3 px-2 flex flex-col items-center transition-all border-2 
-                  ${isActive ? "border-sky-500 bg-white shadow-sm" : "border-transparent bg-white shadow-sm opacity-70"}`}
+                className={`min-w-[85px] snap-start cursor-pointer rounded-[20px] py-3 px-2 flex flex-col items-center transition-all border-2 ${isActive ? "border-sky-500 bg-white shadow-sm" : "border-transparent bg-white shadow-sm opacity-70"}`}
               >
                 <span
                   className={`text-[10px] font-extrabold ${isActive ? "text-slate-500" : "text-slate-400"}`}
@@ -1182,7 +1746,6 @@ function ItineraryView({
               <Edit2 size={14} /> {isEditingRooms ? "完成" : "編輯"}
             </button>
           </div>
-
           <div className="grid grid-cols-2 gap-3">
             <div className="border-2 border-dashed border-slate-200 rounded-2xl p-3.5 bg-[#f8fafc]">
               <p className="text-[11px] font-extrabold text-slate-400 mb-1.5">
@@ -1207,7 +1770,6 @@ function ItineraryView({
                 )}
               </div>
             </div>
-
             <div className="border-2 border-dashed border-slate-200 rounded-2xl p-3.5 bg-[#f8fafc]">
               <p className="text-[11px] font-extrabold text-slate-400 mb-1.5">
                 ROOM 2 (那霸)
@@ -1282,8 +1844,8 @@ function ItineraryView({
                                 }
                                 className="w-full mt-3 bg-sky-50 hover:bg-sky-100 text-sky-600 font-bold py-2.5 rounded-xl text-sm transition-colors border border-sky-100 flex items-center justify-center gap-2 active:scale-95"
                               >
-                                {getModalIcon(item.type, 14)}
-                                點擊查看 {item.options.length} 項內容
+                                {getModalIcon(item.type, 14)} 點擊查看{" "}
+                                {item.options.length} 項內容
                               </button>
                             )}
                           </div>
@@ -1304,8 +1866,7 @@ function ItineraryView({
           <div className="bg-white w-full max-w-md h-[85vh] sm:h-[80vh] rounded-t-[32px] sm:rounded-3xl p-5 flex flex-col shadow-2xl animate-in slide-in-from-bottom-10">
             <div className="flex justify-between items-center pb-3 mb-2 border-b border-slate-100">
               <h3 className="font-extrabold text-slate-800 text-lg flex items-center gap-2">
-                {getModalIcon(selectedOptions.type, 20)}
-                {selectedOptions.title}
+                {getModalIcon(selectedOptions.type, 20)} {selectedOptions.title}
               </h3>
               <button
                 onClick={() => setSelectedOptions(null)}
@@ -1317,7 +1878,6 @@ function ItineraryView({
 
             <div className="overflow-y-auto flex-1 space-y-4 pb-8 pr-1 hide-scrollbar mt-2">
               {selectedOptions.options.map((opt, i) => {
-                // 🚀 判斷這張卡片是不是電子門票，以及它的使用狀態
                 const isUsed = opt.isTicket && usedTickets[opt.id];
 
                 return (
@@ -1333,7 +1893,6 @@ function ItineraryView({
                           className={`w-full h-full object-cover cursor-zoom-in group-hover:scale-105 transition-transform duration-300 ${isUsed ? "grayscale opacity-30" : ""}`}
                           onClick={() => setZoomedImage(opt.img)}
                         />
-                        {/* 🚀 已使用印章效果 */}
                         {isUsed && (
                           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                             <span className="bg-slate-800/80 text-white font-black tracking-widest text-3xl px-6 py-2 border-4 border-white/80 transform -rotate-12 rounded-lg backdrop-blur-sm shadow-xl">
@@ -1359,8 +1918,10 @@ function ItineraryView({
 
                       {opt.note && (
                         <div className="mb-3 bg-rose-50 text-rose-600 text-xs font-bold px-3 py-2.5 rounded-lg border border-rose-100 flex items-start gap-1.5 leading-relaxed">
-                          <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                          <span>{opt.note}</span>
+                          <AlertCircle size={14} className="shrink-0 mt-0.5" />{" "}
+                          <span className="whitespace-pre-line">
+                            {opt.note}
+                          </span>
                         </div>
                       )}
 
@@ -1370,94 +1931,33 @@ function ItineraryView({
                         </p>
                       )}
 
-                      {opt.buyList && opt.buyList.length > 0 && (
-                        <div className="flex overflow-x-auto gap-3 pb-3 mb-2 hide-scrollbar">
-                          {opt.buyList.map((item, itemIdx) => (
-                            <div
-                              key={itemIdx}
-                              className="flex flex-col items-center w-[80px] shrink-0"
-                            >
-                              <div
-                                className="w-16 h-16 bg-white rounded-xl overflow-hidden mb-2 shadow-sm border border-slate-100 flex items-center justify-center cursor-zoom-in"
-                                onClick={() =>
-                                  item.img && setZoomedImage(item.img)
-                                }
-                              >
-                                {item.img ? (
-                                  <img
-                                    src={item.img}
-                                    className="w-full h-full object-cover"
-                                    alt={item.name}
-                                  />
-                                ) : (
-                                  <ShoppingBag
-                                    size={20}
-                                    className="text-slate-300"
-                                  />
-                                )}
-                              </div>
-                              <span className="text-[11px] font-bold text-slate-700 text-center leading-tight whitespace-pre-wrap">
-                                {item.name}
-                              </span>
-                              {item.desc && (
-                                <span className="text-[9px] text-slate-500 text-center leading-tight mt-0.5">
-                                  {item.desc}
-                                </span>
-                              )}
-                              {item.alert && (
-                                <span className="mt-1.5 bg-rose-50 text-rose-600 text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
-                                  <AlertCircle size={10} /> {item.alert}
-                                </span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
                       <div className="mt-auto pt-2">
-                        {/* 🚀 如果是電子門票，顯示切換使用狀態的專屬按鈕 */}
                         {opt.isTicket ? (
                           <button
-                            onClick={() =>
+                            onClick={() => {
+                              if (!isTicketUnlockDay) {
+                                alert(
+                                  "🎟️ 電子門票只限 5/11 當日開放驗票喔！\n(提示：點擊首頁上方的 🎁 測試按鈕可強制解鎖)",
+                                );
+                                return;
+                              }
                               setUsedTickets((prev) => ({
                                 ...prev,
                                 [opt.id]: !prev[opt.id],
-                              }))
-                            }
-                            className={`flex items-center justify-center gap-2 w-full text-sm font-bold py-3 rounded-xl shadow-sm active:scale-95 transition-all ${
-                              isUsed
-                                ? "bg-slate-100 text-slate-500 hover:bg-slate-200 border border-slate-200"
-                                : "bg-teal-500 hover:bg-teal-600 text-white shadow-md"
-                            }`}
+                              }));
+                            }}
+                            className={`flex items-center justify-center gap-2 w-full text-sm font-bold py-3 rounded-xl shadow-sm transition-all ${!isTicketUnlockDay ? "bg-slate-200 text-slate-400 cursor-not-allowed" : isUsed ? "bg-slate-100 text-slate-500 hover:bg-slate-200 border border-slate-200 active:scale-95" : "bg-teal-500 hover:bg-teal-600 text-white shadow-md active:scale-95"}`}
                           >
-                            {isUsed ? (
+                            {!isTicketUnlockDay ? (
+                              "⏳ 5/11 當日開放驗票"
+                            ) : isUsed ? (
                               "取消標記 (復原)"
                             ) : (
                               <>
-                                <CheckCircle2 size={16} />
-                                點擊標記為「已使用」
+                                <CheckCircle2 size={16} /> 點擊標記為「已使用」
                               </>
                             )}
                           </button>
-                        ) : opt.coupon ? (
-                          <div className="flex gap-2">
-                            <a
-                              href={opt.map}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-bold py-3 rounded-xl transition-colors border border-emerald-100 active:scale-95"
-                            >
-                              <MapPin size={16} /> 開啟地圖
-                            </a>
-                            <a
-                              href={opt.coupon}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex-1 flex items-center justify-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-sm font-bold py-3 rounded-xl transition-colors border border-rose-100 active:scale-95"
-                            >
-                              <Ticket size={16} /> 領取優惠券
-                            </a>
-                          </div>
                         ) : opt.map ? (
                           <a
                             href={opt.map}
@@ -1468,6 +1968,26 @@ function ItineraryView({
                             <MapPin size={16} /> 開啟 Google Map
                           </a>
                         ) : null}
+
+                        {/* ⛩️ 波上宮專屬：妹妹搖神籤按鈕 */}
+                        {opt.isOmikuji && isBirthdayActive && (
+                          <div className="mt-4 p-4 bg-orange-50 border border-orange-200 rounded-xl text-center animate-in zoom-in duration-500">
+                            <p className="text-[13px] font-bold text-orange-800 mb-3 flex items-center justify-center gap-1.5">
+                              <Sparkles size={14} />{" "}
+                              參拜完成！妹妹來抽專屬神籤吧{" "}
+                              <Sparkles size={14} />
+                            </p>
+                            <button
+                              onClick={() => {
+                                setSelectedOptions(null);
+                                drawOmikuji();
+                              }}
+                              className="w-full bg-gradient-to-r from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 text-white font-bold py-3 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2"
+                            >
+                              ⛩️ 搖神籤！測試今日運氣
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1494,11 +2014,109 @@ function ItineraryView({
           />
         </div>
       )}
+
+      {/* 🚀 OMIKUJI 全螢幕互動求籤系統 */}
+      {omikujiState.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          {omikujiState.step === "shaking" && (
+            <div className="flex flex-col items-center animate-in fade-in duration-300">
+              <div className="absolute top-20 bg-rose-500 text-white font-bold px-4 py-1.5 rounded-full animate-bounce shadow-lg flex items-center gap-2">
+                <Sparkles size={16} /> 壽星妹妹 ♉✨ 專屬加成神籤
+              </div>
+              <div className="text-6xl animate-bounce mb-2">🔔</div>
+              <div className="text-9xl animate-shake-omikuji drop-shadow-2xl">
+                🏮
+              </div>
+              <p className="mt-8 text-white font-bold text-xl tracking-widest animate-pulse">
+                神明指引中...
+              </p>
+            </div>
+          )}
+
+          {omikujiState.step === "falling" && (
+            <div className="flex flex-col items-center relative h-64">
+              <div className="text-9xl z-10 drop-shadow-2xl">🏮</div>
+              <div className="absolute top-20 w-4 h-24 bg-amber-200 border-2 border-amber-700 rounded-sm animate-fall-stick z-0 shadow-md flex items-end justify-center pb-2 text-[10px] font-black text-amber-900">
+                籤
+              </div>
+            </div>
+          )}
+
+          {omikujiState.step === "result" && omikujiState.result && (
+            <>
+              <div className="absolute inset-0 overflow-hidden pointer-events-none z-[-1]">
+                {[...Array(15)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="absolute text-pink-300 opacity-80"
+                    style={{
+                      top: `${Math.random() * -20}%`,
+                      left: `${Math.random() * 100}%`,
+                      animation: `fall-sakura ${Math.random() * 2 + 2}s linear forwards`,
+                      fontSize: `${Math.random() * 15 + 15}px`,
+                    }}
+                  >
+                    🌸
+                  </div>
+                ))}
+              </div>
+              <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center shadow-[0_0_60px_rgba(255,255,255,0.2)] relative animate-in zoom-in-95 duration-500">
+                <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white font-bold px-4 py-1 rounded-full text-sm shadow-lg whitespace-nowrap">
+                  妹妹的專屬神籤
+                </div>
+                <h2
+                  className={`text-4xl font-black tracking-widest mt-4 mb-3 ${omikujiState.result.color} drop-shadow-sm`}
+                >
+                  {omikujiState.result.title}
+                </h2>
+                <p className="font-bold text-slate-600 mb-6 text-base">
+                  {omikujiState.result.desc}
+                </p>
+                <div
+                  className={`p-6 rounded-2xl border-2 ${omikujiState.result.bg} shadow-inner mb-6 relative overflow-hidden`}
+                >
+                  <div className="absolute top-0 right-0 bg-white/40 p-2 rounded-bl-2xl">
+                    <Gift size={20} className={omikujiState.result.color} />
+                  </div>
+                  <p className="font-extrabold text-slate-800 text-[15px] leading-relaxed whitespace-pre-line text-left mt-2">
+                    {omikujiState.result.prize}
+                  </p>
+                </div>
+
+                {/* 🚀 判斷是否需要金主買單，並直接存入百寶袋 */}
+                {needsSponsor(omikujiState.result.prize) ? (
+                  <button
+                    onClick={() => {
+                      const resultObj = omikujiState.result;
+                      setOmikujiState({
+                        isOpen: false,
+                        step: null,
+                        result: null,
+                      });
+                      startSponsorDraw(resultObj); // 啟動隨機動畫的金主轉盤
+                    }}
+                    className="w-full bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-white font-bold py-3.5 rounded-xl shadow-md active:scale-95 transition-transform flex items-center justify-center gap-2"
+                  >
+                    <Dices size={20} /> 抽出買單金主並收下禮物
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleAcceptPrize}
+                    className="w-full bg-slate-800 text-white font-bold py-3.5 rounded-xl shadow-md active:scale-95 transition-transform"
+                  >
+                    收下禮物 (已自動存入百寶袋)
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-// --- 會計、航班、優惠券模組保持不變 ---
+// --- 會計模組 ---
 function AccountingView({
   expenses,
   currency,
@@ -1514,6 +2132,8 @@ function AccountingView({
   handleEditExpense,
   handleCloseForm,
   editingId,
+  sponsorDraws,
+  startSponsorDraw,
 }) {
   const [view, setView] = useState("list");
 
@@ -1571,6 +2191,38 @@ function AccountingView({
           🖩 結算中心
         </button>
       </div>
+
+      {/* <div className="bg-amber-50 rounded-2xl p-4 border border-amber-200 shadow-sm">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-extrabold text-amber-800 flex items-center gap-1.5">
+            <Dices size={18} /> 金主抽籤站
+          </h3>
+        </div>
+        <button
+          onClick={() => startSponsorDraw(null)}
+          className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-white font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all mb-4"
+        >
+          🎲 抽出本次買單金主
+        </button>
+
+        {sponsorDraws.length > 0 && (
+          <div className="bg-white/60 rounded-xl p-3 border border-amber-100">
+            <p className="text-[11px] font-bold text-amber-700 mb-2">
+              🏆 近期金主光榮榜
+            </p>
+            <div className="flex gap-2 overflow-x-auto hide-scrollbar">
+              {sponsorDraws.slice(0, 5).map((draw) => (
+                <span
+                  key={draw.id}
+                  className="bg-white px-2.5 py-1 rounded-md text-xs font-bold text-slate-700 shadow-sm border border-slate-100 whitespace-nowrap shrink-0"
+                >
+                  {draw.payer} 💸
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div> */}
 
       {view === "list" ? (
         <div className="space-y-3">
@@ -1840,10 +2492,72 @@ function FlightsView() {
   );
 }
 
-function CouponsView() {
-  const [zoomedCoupon, setZoomedCoupon] = useState(null);
+// 🚀 全新購物優惠模組
+function ShoppingView() {
+  const [zoomedImage, setZoomedImage] = useState(null);
+
+  // 購物願望清單狀態 (使用 LocalStorage 記憶)
+  const [shoppingList, setShoppingList] = useState(() => {
+    const saved = localStorage.getItem("okinawa_shopping_list");
+    return saved
+      ? JSON.parse(saved)
+      : {
+          item1: false,
+          item2: false,
+          item3: false,
+          item4: false,
+          item5: false,
+        };
+  });
+
+  const toggleItem = (key) => {
+    const newList = { ...shoppingList, [key]: !shoppingList[key] };
+    setShoppingList(newList);
+    localStorage.setItem("okinawa_shopping_list", JSON.stringify(newList));
+  };
+
+  const wishListItems = [
+    { id: "item1", name: "腳酸貼布", img: "/shopping/patch.jpg" },
+    { id: "item2", name: "熱敷眼罩", img: "/shopping/eyemask.png" },
+    { id: "item3", name: "無印良品布丁 🍮", img: "/shopping/pudding.jpeg" },
+    {
+      id: "item4",
+      name: "南風堂辣味蝦餅",
+      img: "/shopping/shrimp_cracker.jpg",
+    },
+    { id: "item5", name: "大創細毛牙刷", img: "/shopping/toothbrush.jpg" },
+    { id: "item6", name: "大創防丟", img: "/shopping/tag.jpg" },
+    { id: "item7", name: "沖繩海帶芽", img: "/shopping/seaweed.jpg" },
+    {
+      id: "item8",
+      name: "石垣島辣油(小辣)",
+      img: "/shopping/smallspricymild.jpg",
+    },
+    {
+      id: "item9",
+      name: "邊銀食堂蒜油\n(拌麵，水餃沾醬)",
+      img: "/shopping/okinawaniniku1.jpg",
+    },
+  ];
 
   const coupons = [
+    {
+      name: "唐吉訶德",
+      link: "https://japanportal.donki-global.com/coupon/cp001_zhtw.html",
+      thresholds: [
+        { spend: "1萬~3萬", off: "免稅10% + 5% OFF" },
+        { spend: "3萬+", off: "免稅10% + 7% OFF" },
+      ],
+    },
+    {
+      name: "BicCamera",
+      img: "/coupon/biccamera.png",
+      thresholds: [
+        { spend: "家電/相機/手錶", off: "免稅10% + 7% OFF" },
+        { spend: "藥品/化妝/食品", off: "免稅10% + 5% OFF" },
+        { spend: "日本清酒", off: "免稅10% + 3% OFF" },
+      ],
+    },
     {
       name: "SUGI 杉藥局",
       img: "/coupon/sugi.png",
@@ -1863,6 +2577,24 @@ function CouponsView() {
       ],
     },
     {
+      name: "尚都樂客 Sundrug",
+      img: "/coupon/Sundrug.jpg",
+      thresholds: [
+        { spend: "1萬~3萬", off: "3% OFF" },
+        { spend: "3萬~5萬", off: "5% OFF" },
+        { spend: "5萬+", off: "7% OFF" },
+      ],
+    },
+    {
+      name: "Cocokara Fine",
+      img: "/coupon/Cocokara Fine.jpeg",
+      thresholds: [
+        { spend: "1萬~3萬", off: "3% OFF" },
+        { spend: "3萬~5萬", off: "5% OFF" },
+        { spend: "5萬+", off: "7% OFF" },
+      ],
+    },
+    {
       name: "札幌藥妝 (北海道連鎖)",
       img: "/coupon/sapporo.png",
       thresholds: [{ spend: "無門檻", off: "免稅 + 5% OFF" }],
@@ -1870,78 +2602,146 @@ function CouponsView() {
   ];
 
   return (
-    <div className="space-y-4">
-      <h2 className="font-bold text-slate-800 text-lg mb-2 flex items-center gap-2">
-        <Ticket size={20} /> 專屬優惠券
-      </h2>
-      {coupons.map((coupon, idx) => (
-        <div
-          key={idx}
-          className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4 group transition-transform"
-        >
-          <div className="flex justify-between items-center mb-3">
-            <h3 className="font-extrabold text-sky-800 text-lg">
-              {coupon.name}
-            </h3>
-            <span className="text-[10px] bg-rose-50 text-rose-600 px-2 py-1 rounded-md font-bold">
-              點擊顯示條碼
-            </span>
-          </div>
-          <div className="space-y-1.5 mb-4">
-            {coupon.thresholds.map((t, i) => (
-              <div
-                key={i}
-                className="flex justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-100"
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-bold text-slate-800 text-lg mb-3 flex items-center gap-2">
+          <Ticket size={20} className="text-amber-500" /> 專屬優惠券
+        </h2>
+        {coupons.map((coupon, idx) => (
+          <div
+            key={idx}
+            className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 mb-4 group transition-transform"
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-extrabold text-sky-800 text-lg">
+                {coupon.name}
+              </h3>
+            </div>
+            <div className="space-y-2 mb-5">
+              {coupon.thresholds.map((t, i) => (
+                <div
+                  key={i}
+                  className="flex justify-between bg-slate-50 p-3 rounded-xl border border-slate-100"
+                >
+                  <span className="text-sm font-medium text-slate-600">
+                    滿{" "}
+                    <span className="font-bold text-slate-800">{t.spend}</span>{" "}
+                    日圓
+                  </span>
+                  <span className="text-sm font-extrabold text-rose-500">
+                    {t.off}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* 判斷是給網址連結還是圖片顯示 */}
+            {coupon.link ? (
+              <a
+                href={coupon.link}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full bg-rose-50 text-rose-600 font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-rose-100 transition-colors active:scale-95 border border-rose-200"
               >
-                <span className="text-sm font-medium text-slate-600">
-                  滿 <span className="font-bold text-slate-800">{t.spend}</span>{" "}
-                  日圓
-                </span>
-                <span className="text-sm font-extrabold text-rose-500">
-                  {t.off}
+                <Ticket size={20} /> 前往領取網頁版優惠券
+              </a>
+            ) : (
+              <div
+                className="w-full h-20 bg-slate-100 rounded-2xl flex items-center justify-center border border-slate-200 border-dashed relative overflow-hidden group-hover:bg-slate-200 transition-colors cursor-zoom-in"
+                onClick={() => {
+                  if (coupon.img) setZoomedImage(coupon.img);
+                }}
+              >
+                {coupon.img ? (
+                  <img
+                    src={coupon.img}
+                    className="w-full h-full object-cover"
+                    alt="coupon"
+                  />
+                ) : (
+                  <div className="flex gap-1 items-center opacity-40">
+                    <Ticket size={24} className="text-slate-500" />
+                    <span className="px-2 font-bold text-sm text-slate-600">
+                      點擊顯示圖片
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* 🚀 日本優惠券懶人包 大按鈕 */}
+      <div className="mt-6 mb-8">
+        <a
+          href="https://rabbitfunaround.com/blog/post/japan-coupon?gad_source=1&gad_campaignid=23076925876&gbraid=0AAAAACmBVGrUjUsNId00GWN-wp3SoUfrY&gclid=Cj0KCQjwk_bPBhDXARIsACiq8R010ok6ncZ0ISHwJqxQ3tIp9mAfppDJj8qreYwHgmhSqLOQJ_y8mkAaAnjyEALw_wcB#BicCamera_%E5%AE%B6%E9%9B%BB%E8%97%A5%E5%A6%9D"
+          target="_blank"
+          rel="noreferrer"
+          className="w-full bg-slate-800 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform"
+        >
+          <Sparkles size={20} className="text-yellow-400" />
+          查看完整「日本優惠券懶人包」
+        </a>
+      </div>
+
+      {/* 血拚願望清單區塊 */}
+      <div>
+        <h2 className="font-bold text-slate-800 text-lg mb-3 flex items-center gap-2">
+          <ShoppingBag size={20} className="text-rose-500" /> 血拚願望清單
+        </h2>
+        <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+          <div className="space-y-3">
+            {wishListItems.map((item) => (
+              <div
+                key={item.id}
+                className={`flex items-center gap-4 p-3 rounded-2xl border transition-all cursor-pointer ${shoppingList[item.id] ? "bg-slate-50 border-slate-200" : "bg-white border-rose-100 shadow-sm hover:border-rose-300"}`}
+                onClick={() => toggleItem(item.id)}
+              >
+                <div
+                  className={`w-6 h-6 rounded-lg flex items-center justify-center border-2 shrink-0 transition-colors ${shoppingList[item.id] ? "bg-teal-500 border-teal-500" : "border-slate-300"}`}
+                >
+                  {shoppingList[item.id] && (
+                    <CheckCircle2 size={16} className="text-white" />
+                  )}
+                </div>
+                {/* 🚀 加入 onClick 與 e.stopPropagation()，確保點擊圖片是放大而不是打勾 */}
+                <div
+                  className="w-12 h-12 bg-slate-100 rounded-xl overflow-hidden shrink-0 border border-slate-200 cursor-zoom-in"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (item.img) setZoomedImage(item.img);
+                  }}
+                >
+                  <img
+                    src={item.img}
+                    alt={item.name}
+                    className={`w-full h-full object-cover transition-all ${shoppingList[item.id] ? "grayscale opacity-60" : ""}`}
+                  />
+                </div>
+                <span
+                  className={`font-bold text-[15px] flex-1 whitespace-pre-line transition-all ${shoppingList[item.id] ? "text-slate-400 line-through" : "text-slate-800"}`}
+                >
+                  {item.name}
                 </span>
               </div>
             ))}
           </div>
-          <div className="w-full h-16 bg-slate-100 rounded-lg flex items-center justify-center border border-slate-200 border-dashed relative overflow-hidden group-hover:bg-slate-200 transition-colors cursor-zoom-in">
-            {coupon.img ? (
-              <img
-                src={coupon.img}
-                className="w-full h-full object-cover"
-                alt="coupon"
-                onClick={() => setZoomedCoupon(coupon.img)}
-              />
-            ) : (
-              <div className="flex gap-1 items-center opacity-30">
-                <div className="w-1 h-10 bg-slate-800"></div>
-                <div className="w-2 h-10 bg-slate-800"></div>
-                <div className="w-1 h-10 bg-slate-800"></div>
-                <div className="w-3 h-10 bg-slate-800"></div>
-                <span className="px-2 font-mono text-sm tracking-widest text-slate-800">
-                  點擊顯示圖片
-                </span>
-                <div className="w-2 h-10 bg-slate-800"></div>
-                <div className="w-1 h-10 bg-slate-800"></div>
-                <div className="w-2 h-10 bg-slate-800"></div>
-              </div>
-            )}
-          </div>
         </div>
-      ))}
+      </div>
 
-      {/* 優惠券全螢幕放大 (Lightbox) */}
-      {zoomedCoupon && (
+      {zoomedImage && (
         <div
           className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4 cursor-zoom-out animate-in fade-in"
-          onClick={() => setZoomedCoupon(null)}
+          onClick={() => setZoomedImage(null)}
         >
           <button className="absolute top-6 right-4 sm:right-6 text-white/70 hover:text-white p-2">
             <X size={32} />
           </button>
           <img
-            src={zoomedCoupon}
+            src={zoomedImage}
             className="max-w-full max-h-full object-contain rounded-xl shadow-2xl"
-            alt="Fullscreen Coupon"
+            alt="Fullscreen Image"
           />
         </div>
       )}
