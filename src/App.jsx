@@ -59,7 +59,9 @@ const DRAW_STATION_PARTICIPANTS = ["爸爸", "媽媽", "妹妹", "Candy", "書�
 const DRAW_STATION_WITHOUT_SISTER = DRAW_STATION_PARTICIPANTS.filter(
   (name) => name !== "妹妹",
 );
-const BIRTHDAY_SURPRISE_KEY = "okinawa_birthday_surprise_hour";
+const BIRTHDAY_SURPRISE_KEY = "okinawa_birthday_surprise_used_hours";
+const SPONSOR_RECORDS_KEY = "okinawa_sponsor_records";
+const LUCKY_RECORDS_KEY = "okinawa_lucky_records";
 
 function getDbOrThrow() {
   if (!db) {
@@ -72,9 +74,61 @@ function getDbOrThrow() {
   return db;
 }
 
-function getCurrentHourStamp() {
-  const now = new Date();
-  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}-${now.getHours()}`;
+function getCurrentHourStamp(date = new Date()) {
+  const now = date;
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hour = String(now.getHours()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}-${hour}`;
+}
+
+function readLocalStorageJson(key, fallback) {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch (error) {
+    console.error(`Failed to parse localStorage key: ${key}`, error);
+    return fallback;
+  }
+}
+
+function isBirthdaySurpriseWindow(now) {
+  return (
+    now.getFullYear() === 2026 &&
+    now.getMonth() === 4 &&
+    now.getDate() === 13 &&
+    now.getHours() >= 11 &&
+    now.getHours() < 23
+  );
+}
+
+function buildLeaderboard(records) {
+  const summary = records.reduce((acc, record) => {
+    if (!record?.person) return acc;
+
+    if (!acc[record.person]) {
+      acc[record.person] = {
+        person: record.person,
+        count: 0,
+        latestMealName: "",
+        latestCreatedAt: 0,
+      };
+    }
+
+    acc[record.person].count += 1;
+
+    if ((record.createdAt || 0) >= acc[record.person].latestCreatedAt) {
+      acc[record.person].latestMealName = record.mealName || "未填寫餐名";
+      acc[record.person].latestCreatedAt = record.createdAt || 0;
+    }
+
+    return acc;
+  }, {});
+
+  return Object.values(summary).sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return b.latestCreatedAt - a.latestCreatedAt;
+  });
 }
 
 function createSecretGuessRows(participants) {
@@ -87,6 +141,7 @@ function createSecretGuessRows(participants) {
 export default function OkinawaTravelApp() {
   const [activeTab, setActiveTab] = useState("itinerary");
   const [currency, setCurrency] = useState("JPY");
+  const [currentTime, setCurrentTime] = useState(() => new Date());
 
   // 生日與特殊彩蛋狀態
   const [showBirthday, setShowBirthday] = useState(false);
@@ -105,14 +160,21 @@ export default function OkinawaTravelApp() {
   const [editingId, setEditingId] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [firebaseError, setFirebaseError] = useState(firebaseInitError);
-  const [birthdaySurpriseStamp, setBirthdaySurpriseStamp] = useState(
-    () => localStorage.getItem(BIRTHDAY_SURPRISE_KEY) || "",
+  const [birthdaySurpriseUsedHours, setBirthdaySurpriseUsedHours] = useState(
+    () => readLocalStorageJson(BIRTHDAY_SURPRISE_KEY, {}),
   );
 
   // Firebase: 妹妹的百寶袋 & 金主抽籤紀錄
   const [sisterPrizes, setSisterPrizes] = useState([]);
   const [showPrizeBag, setShowPrizeBag] = useState(false);
   const [sponsorDraws, setSponsorDraws] = useState([]);
+  const [sponsorRecords, setSponsorRecords] = useState(() =>
+    readLocalStorageJson(SPONSOR_RECORDS_KEY, []),
+  );
+  const [luckyRecords, setLuckyRecords] = useState(() =>
+    readLocalStorageJson(LUCKY_RECORDS_KEY, []),
+  );
+  const [drawMealName, setDrawMealName] = useState("");
 
   // 本機暫存: 飯店房號 & 門票
   const [rooms, setRooms] = useState(() => {
@@ -141,6 +203,29 @@ export default function OkinawaTravelApp() {
   useEffect(() => {
     localStorage.setItem("okinawa_tickets", JSON.stringify(usedTickets));
   }, [usedTickets]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      BIRTHDAY_SURPRISE_KEY,
+      JSON.stringify(birthdaySurpriseUsedHours),
+    );
+  }, [birthdaySurpriseUsedHours]);
+
+  useEffect(() => {
+    localStorage.setItem(SPONSOR_RECORDS_KEY, JSON.stringify(sponsorRecords));
+  }, [sponsorRecords]);
+
+  useEffect(() => {
+    localStorage.setItem(LUCKY_RECORDS_KEY, JSON.stringify(luckyRecords));
+  }, [luckyRecords]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Firebase 監聽器
   useEffect(() => {
@@ -282,12 +367,15 @@ export default function OkinawaTravelApp() {
 
   // 生日自動觸發判定 (嚴格鎖定 5/13)
   useEffect(() => {
-    const today = new Date();
-    if (today.getMonth() === 4 && today.getDate() === 13) {
-      setIsBirthdayActive(true);
+    const birthdayEnabled =
+      currentTime.getFullYear() === 2026 &&
+      currentTime.getMonth() === 4 &&
+      currentTime.getDate() === 13;
+    setIsBirthdayActive(birthdayEnabled);
+    if (birthdayEnabled) {
       setShowBirthday(true);
     }
-  }, []);
+  }, [currentTime]);
 
   // 🚀 修正：打開表單時，自動帶入最新匯率
   const handleOpenForm = () => {
@@ -440,9 +528,14 @@ export default function OkinawaTravelApp() {
     secretWinner: null,
   });
 
-  const currentHourStamp = getCurrentHourStamp();
+  const currentHourStamp = getCurrentHourStamp(currentTime);
+  const isBirthdaySurpriseOpen = isBirthdaySurpriseWindow(currentTime);
+  const isBirthdaySurpriseUsedThisHour =
+    birthdaySurpriseUsedHours[currentHourStamp] === true;
   const isBirthdaySurpriseAvailable =
-    birthdaySurpriseStamp !== currentHourStamp;
+    isBirthdaySurpriseOpen && !isBirthdaySurpriseUsedThisHour;
+  const sponsorLeaderboard = buildLeaderboard(sponsorRecords);
+  const luckyLeaderboard = buildLeaderboard(luckyRecords);
 
   const closeSponsorDraw = () => {
     setSponsorDrawState({
@@ -530,10 +623,12 @@ export default function OkinawaTravelApp() {
     winner,
     scenario,
     scenarioLabel,
+    method,
     pendingPrize = null,
     secretNumber = null,
     secretWinner = null,
   }) => {
+    const createdAt = Date.now();
     setSponsorDrawState((prev) => ({
       ...prev,
       isRolling: false,
@@ -543,13 +638,29 @@ export default function OkinawaTravelApp() {
       secretWinner,
     }));
 
+    const record = {
+      mode: scenario,
+      method,
+      person: winner,
+      mealName: drawMealName.trim(),
+      createdAt,
+    };
+
+    if (scenario === "meal-free") {
+      setLuckyRecords((prev) => [record, ...prev]);
+    }
+
+    if (scenario === "sponsor") {
+      setSponsorRecords((prev) => [record, ...prev]);
+    }
+
     try {
       const firestore = getDbOrThrow();
       await addDoc(collection(firestore, "payer_draws"), {
         payer: winner,
         scenario,
         scenarioLabel,
-        createdAt: Date.now(),
+        createdAt,
       });
 
       if (pendingPrize) {
@@ -584,22 +695,24 @@ export default function OkinawaTravelApp() {
     const scenarioMap = {
       birthday: {
         label: "妹妹生日驚喜抽籤",
-        description: "從神社入口啟動，妹妹不參加抽籤。",
+        description: "生日驚喜專用時段，每小時限用一次。",
       },
       "meal-free": {
-        label: "吃飯幸運兒抽籤",
+        label: "本餐免單幸運兒是...",
         description: "抽出本餐免費的人，不排除妹妹。",
       },
       sponsor: {
-        label: "直接金主抽籤",
-        description: "抽出本次負責買單的人，不排除妹妹。",
+        label: "本次請客金主是...",
+        description: "抽出這餐要付錢的人，不排除妹妹。",
       },
     };
     const { label, description } = scenarioMap[scenario];
 
     if (forceBirthday) {
-      localStorage.setItem(BIRTHDAY_SURPRISE_KEY, currentHourStamp);
-      setBirthdaySurpriseStamp(currentHourStamp);
+      setBirthdaySurpriseUsedHours((prev) => ({
+        ...prev,
+        [currentHourStamp]: true,
+      }));
     }
 
     setSponsorDrawState({
@@ -615,22 +728,25 @@ export default function OkinawaTravelApp() {
       result: null,
       pendingPrize,
       candidates,
-      secretNumber: mode === "secret" ? Math.floor(Math.random() * 100) + 1 : null,
-      secretGuesses:
-        mode === "secret" ? createSecretGuessRows(candidates) : [],
+      secretNumber:
+        mode === "secret" ? Math.floor(Math.random() * 100) + 1 : null,
+      secretGuesses: mode === "secret" ? createSecretGuessRows(candidates) : [],
       secretWinner: null,
     });
 
     if (mode === "secret") return;
 
     let counter = 0;
-    const interval = setInterval(() => {
-      setSponsorDrawState((prev) => ({
-        ...prev,
-        name: candidates[counter % candidates.length],
-      }));
-      counter++;
-    }, mode === "wheel" ? 90 : 120);
+    const interval = setInterval(
+      () => {
+        setSponsorDrawState((prev) => ({
+          ...prev,
+          name: candidates[counter % candidates.length],
+        }));
+        counter++;
+      },
+      mode === "wheel" ? 90 : 120,
+    );
 
     setTimeout(() => {
       clearInterval(interval);
@@ -639,6 +755,7 @@ export default function OkinawaTravelApp() {
         winner,
         scenario,
         scenarioLabel: label,
+        method: mode,
         pendingPrize,
       });
     }, 3000);
@@ -674,6 +791,7 @@ export default function OkinawaTravelApp() {
       winner: winner.name,
       scenario: sponsorDrawState.scenario,
       scenarioLabel: sponsorDrawState.scenarioLabel,
+      method: sponsorDrawState.mode,
       pendingPrize: sponsorDrawState.pendingPrize,
       secretNumber: sponsorDrawState.secretNumber,
       secretWinner: winner,
@@ -856,9 +974,13 @@ export default function OkinawaTravelApp() {
               </button>
             )}
 
-            <div className="text-5xl mb-6">💸</div>
+            <div className="text-5xl mb-6">
+              {sponsorDrawState.scenario === "meal-free" ? "✨" : "⭐"}
+            </div>
             <h2 className="text-xl font-extrabold text-slate-500 mb-6">
-              本次買單金主是...
+              {sponsorDrawState.scenario === "meal-free"
+                ? "本餐免單幸運兒是..."
+                : "本次請客金主是..."}
             </h2>
 
             {/* 動畫類型 1：經典老虎機 (Slot) */}
@@ -925,11 +1047,15 @@ export default function OkinawaTravelApp() {
                     終極密碼 / 比大小
                   </p>
                   <p className="text-xs text-slate-600 mb-4 leading-relaxed">
-                    系統已經選好 1 到 100 的秘密數字，請現場每位參與者輸入名字與數字。
+                    系統已經選好 1 到 100
+                    的秘密數字，請現場每位參與者輸入名字與數字。
                   </p>
                   <div className="space-y-3">
                     {sponsorDrawState.secretGuesses.map((entry, index) => (
-                      <div key={`${entry.name}-${index}`} className="flex gap-2">
+                      <div
+                        key={`${entry.name}-${index}`}
+                        className="flex gap-2"
+                      >
                         <input
                           type="text"
                           value={entry.name}
@@ -983,12 +1109,16 @@ export default function OkinawaTravelApp() {
                   <span className="text-amber-500 font-black">
                     {sponsorDrawState.result}
                   </span>{" "}
-                  🎉
+                  {sponsorDrawState.scenario === "meal-free"
+                    ? "這餐免單 ✨"
+                    : "成為本餐金主 ⭐"}
                 </p>
                 <p className="text-xs text-slate-400">
                   {sponsorDrawState.pendingPrize
                     ? "已連同獎品一起存入百寶袋！"
-                    : "系統已自動記錄至金主光榮榜"}
+                    : sponsorDrawState.scenario === "meal-free"
+                      ? "系統已自動記錄至幸運兒排行榜"
+                      : "系統已自動記錄至金主排行榜"}
                 </p>
                 {sponsorDrawState.secretWinner && (
                   <div className="mt-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -1153,6 +1283,13 @@ export default function OkinawaTravelApp() {
             startSponsorDraw={startSponsorDraw}
             startLuckyDraw={startLuckyDraw}
             canUseBirthdaySurprise={isBirthdaySurpriseAvailable}
+            birthdaySurpriseStatus={
+              isBirthdaySurpriseOpen
+                ? isBirthdaySurpriseUsedThisHour
+                  ? "本小時已使用"
+                  : "本小時可使用"
+                : "開放時間：2026/5/13 11:00-23:00"
+            }
             isBirthdayActive={isBirthdayActive}
             sisterPrizes={sisterPrizes}
           />
@@ -1175,10 +1312,16 @@ export default function OkinawaTravelApp() {
               handleCloseForm={handleCloseForm}
               editingId={editingId}
               sponsorDraws={sponsorDraws}
+              sponsorRecords={sponsorRecords}
+              luckyRecords={luckyRecords}
+              sponsorLeaderboard={sponsorLeaderboard}
+              luckyLeaderboard={luckyLeaderboard}
               startSponsorDraw={startSponsorDraw}
               startLuckyDraw={startLuckyDraw}
               exchangeRate={exchangeRate}
               handleOpenForm={handleOpenForm}
+              drawMealName={drawMealName}
+              setDrawMealName={setDrawMealName}
             />
           </div>
         )}
@@ -2020,13 +2163,7 @@ function LegacyItineraryView({
           desc: "點擊查看",
           options: [
             {
-              name: "傑克牛排館 (Jack's Steak House)",
-              desc: "營業時間 11:00 - 22:30 (星期三休息)。沖繩經典老字號美式牛排館。",
-              map: "https://maps.google.com/?q=傑克牛排館",
-              img: "/food/jack-steak.jpg",
-            },
-            {
-              name: "賴長島 (海風露台)",
+              name: "瀨長島 (海風露台)",
               desc: "在瀨長島找間喜歡的異國料理看夜景吃晚餐",
               map: "https://maps.google.com/?q=瀨長島海風露台",
             },
@@ -2073,7 +2210,14 @@ function LegacyItineraryView({
           type: "spot",
           time: "13:30",
           title: "抵達租車公司還車",
-          desc: "滿油還車、保留加油收據！最晚 15:30 前要還車。\n建議 13:30 到租車公司，最晚 13:50 到並等接駁去機場。\n最好是 14:00 前到機場！",
+          desc: "點擊查看",
+          options: [
+            {
+              name: "ocean star",
+              desc: "滿油還車、保留加油收據！最晚 15:30 前要還車。\n建議 13:30 到租車公司，最晚 13:50 到並等接駁去機場。\n最好是 14:00 前到機場！",
+              map: "https://maps.google.com/?q=ocean+star",
+            },
+          ],
         },
         {
           type: "flight",
@@ -2253,24 +2397,20 @@ function LegacyItineraryView({
           <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full text-center shadow-[0_0_80px_rgba(251,191,36,0.3)] relative overflow-hidden">
             {!sponsorDrawState.isRolling && (
               <button
-                onClick={() =>
-                  setSponsorDrawState({
-                    isOpen: false,
-                    isRolling: false,
-                    name: "",
-                    result: null,
-                    pendingPrize: null,
-                  })
-                }
+                onClick={closeSponsorDraw}
                 className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full p-1.5 active:scale-90 z-20"
               >
                 <X size={20} />
               </button>
             )}
 
-            <div className="text-5xl mb-6">💸</div>
+            <div className="text-5xl mb-6">
+              {sponsorDrawState.scenario === "meal-free" ? "✨" : "⭐"}
+            </div>
             <h2 className="text-xl font-extrabold text-slate-500 mb-6">
-              本次買單金主是...
+              {sponsorDrawState.scenario === "meal-free"
+                ? "本餐免單幸運兒是..."
+                : "本次請客金主是..."}
             </h2>
 
             {/* 動畫類型 1：經典老虎機 (Slot) */}
@@ -2329,23 +2469,19 @@ function LegacyItineraryView({
                   <span className="text-amber-500 font-black">
                     {sponsorDrawState.result}
                   </span>{" "}
-                  🎉
+                  {sponsorDrawState.scenario === "meal-free"
+                    ? "這餐免單 ✨"
+                    : "成為本餐金主 ⭐"}
                 </p>
                 <p className="text-xs text-slate-400">
                   {sponsorDrawState.pendingPrize
                     ? "已連同獎品一起存入百寶袋！"
-                    : "系統已自動記錄至金主光榮榜"}
+                    : sponsorDrawState.scenario === "meal-free"
+                      ? "系統已自動記錄至幸運兒排行榜"
+                      : "系統已自動記錄至金主排行榜"}
                 </p>
                 <button
-                  onClick={() =>
-                    setSponsorDrawState({
-                      isOpen: false,
-                      isRolling: false,
-                      name: "",
-                      result: null,
-                      pendingPrize: null,
-                    })
-                  }
+                  onClick={closeSponsorDraw}
                   className="mt-6 w-full bg-slate-800 text-white font-bold py-3.5 rounded-xl shadow-md active:scale-95"
                 >
                   感謝乾爹 / 乾媽！
@@ -2595,6 +2731,7 @@ function ItineraryView({
   startSponsorDraw,
   startLuckyDraw,
   canUseBirthdaySurprise,
+  birthdaySurpriseStatus,
   isBirthdayActive,
   sisterPrizes,
 }) {
@@ -3758,10 +3895,16 @@ function ItineraryView({
                             </p>
                             <button
                               onClick={() => {
+                                if (!canUseBirthdaySurprise) return;
                                 setSelectedOptions(null);
                                 drawOmikuji();
                               }}
-                              className="w-full bg-gradient-to-r from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 text-white font-bold py-3 rounded-xl shadow-md transition-all active:scale-95 flex justify-center items-center gap-2"
+                              disabled={!canUseBirthdaySurprise}
+                              className={`w-full font-bold py-3 rounded-xl shadow-md transition-all flex justify-center items-center gap-2 ${
+                                canUseBirthdaySurprise
+                                  ? "bg-gradient-to-r from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 text-white active:scale-95"
+                                  : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                              }`}
                             >
                               ⛩️ 搖神籤！測試今日運氣
                             </button>
@@ -3780,9 +3923,18 @@ function ItineraryView({
                                 <Gift size={16} /> 妹妹生日驚喜抽籤
                               </button>
                             ) : (
-                              <p className="mt-3 text-[11px] font-bold text-rose-500">
-                                本小時的生日驚喜抽籤已使用
-                              </p>
+                              <>
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="w-full mt-3 bg-slate-200 text-slate-400 font-bold py-3 rounded-xl cursor-not-allowed flex justify-center items-center gap-2"
+                                >
+                                  <Gift size={16} /> 妹妹生日驚喜抽籤
+                                </button>
+                                <p className="mt-3 text-[11px] font-bold text-rose-500">
+                                  {birthdaySurpriseStatus}
+                                </p>
+                              </>
                             )}
                           </div>
                         )}
@@ -3895,7 +4047,7 @@ function ItineraryView({
                     }}
                     className="w-full bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-white font-bold py-3.5 rounded-xl shadow-md active:scale-95 transition-transform flex items-center justify-center gap-2"
                   >
-                    <Dices size={20} /> 抽出買單金主並收下禮物
+                    <Dices size={20} /> 抽出付款的人並收下禮物
                   </button>
                 ) : (
                   <button
@@ -3931,10 +4083,16 @@ function AccountingView({
   handleCloseForm,
   editingId,
   sponsorDraws,
+  sponsorRecords,
+  luckyRecords,
+  sponsorLeaderboard,
+  luckyLeaderboard,
   startSponsorDraw,
   startLuckyDraw,
   exchangeRate,
   handleOpenForm,
+  drawMealName,
+  setDrawMealName,
 }) {
   const [view, setView] = useState("list");
 
@@ -3982,71 +4140,33 @@ function AccountingView({
     return transfers;
   };
 
+  const latestLuckyRecord = luckyRecords[0];
+  const latestSponsorRecord = sponsorRecords[0];
+
   return (
     <div className="space-y-4">
-      <div className="flex bg-slate-200/50 rounded-xl p-1 shadow-inner">
-        <button
-          onClick={() => setView("list")}
-          className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${view === "list" ? "bg-white shadow text-sky-700" : "text-slate-500"}`}
-        >
-          📝 記帳明細
-        </button>
-        <button
-          onClick={() => setView("settlement")}
-          className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${view === "settlement" ? "bg-white shadow text-sky-700" : "text-slate-500"}`}
-        >
-          🖩 結算中心
-        </button>
-      </div>
-
-      <div className="bg-amber-50 rounded-2xl p-4 border border-amber-200 shadow-sm">
-        <div className="flex justify-between items-center mb-3">
-          <h3 className="font-extrabold text-amber-800 flex items-center gap-1.5">
-            <Dices size={18} /> 金主抽籤站
-          </h3>
+      <section className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <h3 className="font-extrabold text-slate-800">1. 記帳結算</h3>
+          <span className="text-[11px] font-bold text-slate-400">
+            {expenses.length} 筆記錄
+          </span>
         </div>
-        <p className="text-xs text-amber-700 mb-4 leading-relaxed">
-          每次進入都會隨機切換玩法：一般抽籤、轉盤抽籤或終極密碼。
-        </p>
-        <div className="space-y-2.5 mb-4">
+        <div className="flex bg-slate-200/50 rounded-xl p-1 shadow-inner">
           <button
-            onClick={() => startLuckyDraw({ scenario: "meal-free" })}
-            className="w-full bg-gradient-to-r from-emerald-400 to-teal-500 text-white font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all"
+            onClick={() => setView("list")}
+            className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${view === "list" ? "bg-white shadow text-sky-700" : "text-slate-500"}`}
           >
-            吃飯幸運兒抽籤
+            📝 記帳明細
           </button>
           <button
-            onClick={() => startLuckyDraw({ scenario: "sponsor" })}
-            className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-white font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all"
+            onClick={() => setView("settlement")}
+            className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${view === "settlement" ? "bg-white shadow text-sky-700" : "text-slate-500"}`}
           >
-            直接金主抽籤
+            🖩 結算中心
           </button>
         </div>
-        <button
-          onClick={() => startSponsorDraw(null)}
-          className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-white font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all mb-4"
-        >
-          🎲 抽出本次買單金主
-        </button>
-
-        {sponsorDraws.length > 0 && (
-          <div className="bg-white/60 rounded-xl p-3 border border-amber-100">
-            <p className="text-[11px] font-bold text-amber-700 mb-2">
-              🏆 近期金主光榮榜
-            </p>
-            <div className="flex gap-2 overflow-x-auto hide-scrollbar">
-              {sponsorDraws.slice(0, 5).map((draw) => (
-                <span
-                  key={draw.id}
-                  className="bg-white px-2.5 py-1 rounded-md text-xs font-bold text-slate-700 shadow-sm border border-slate-100 whitespace-nowrap shrink-0"
-                >
-                  {draw.payer} 💸
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      </section>
 
       {view === "list" ? (
         <div className="space-y-3">
@@ -4289,6 +4409,132 @@ function AccountingView({
           )}
         </div>
       )}
+
+      <section className="bg-amber-50 rounded-2xl p-4 border border-amber-200 shadow-sm">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-extrabold text-amber-800 flex items-center gap-1.5">
+            <Dices size={18} /> 2. 金主抽籤站
+          </h3>
+        </div>
+        <p className="text-xs text-amber-700 leading-relaxed">
+          每次進入都會隨機切換玩法：一般抽籤、轉盤抽籤或終極密碼。
+        </p>
+        <input
+          type="text"
+          value={drawMealName}
+          onChange={(e) => setDrawMealName(e.target.value)}
+          placeholder="可手動輸入餐名，例如：燒肉五苑"
+          className="mt-4 w-full rounded-xl border border-amber-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-amber-400"
+        />
+        <div className="mt-3 space-y-2.5">
+          <button
+            onClick={() => startLuckyDraw({ scenario: "meal-free" })}
+            className="w-full bg-gradient-to-r from-emerald-400 to-teal-500 text-white font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all"
+          >
+            ✨ 吃飯幸運兒抽籤
+          </button>
+          <button
+            onClick={() => startLuckyDraw({ scenario: "sponsor" })}
+            className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-white font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all"
+          >
+            ⭐ 金主模式抽籤
+          </button>
+        </div>
+        {(latestLuckyRecord || latestSponsorRecord) && (
+          <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-xl bg-white/80 px-3 py-2 border border-emerald-100">
+              <p className="font-bold text-emerald-700">最近免單</p>
+              <p className="mt-1 text-slate-600">
+                {latestLuckyRecord
+                  ? `${latestLuckyRecord.person} · ${
+                      latestLuckyRecord.mealName || "未填寫餐名"
+                    }`
+                  : "尚無紀錄"}
+              </p>
+            </div>
+            <div className="rounded-xl bg-white/80 px-3 py-2 border border-amber-100">
+              <p className="font-bold text-amber-700">最近金主</p>
+              <p className="mt-1 text-slate-600">
+                {latestSponsorRecord
+                  ? `${latestSponsorRecord.person} · ${
+                      latestSponsorRecord.mealName || "未填寫餐名"
+                    }`
+                  : "尚無紀錄"}
+              </p>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+        <h3 className="font-extrabold text-slate-800 mb-3">3. 排行榜</h3>
+        <div className="space-y-3">
+          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
+            <div className="flex items-center justify-between">
+              <p className="font-bold text-emerald-800">幸運兒排行榜</p>
+              <span className="text-[11px] font-bold text-emerald-600">
+                共 {luckyRecords.length} 次免單
+              </span>
+            </div>
+            <div className="mt-3 space-y-2">
+              {luckyLeaderboard.length > 0 ? (
+                luckyLeaderboard.map((entry, index) => (
+                  <div
+                    key={`lucky-${entry.person}`}
+                    className="flex items-center justify-between rounded-xl bg-white px-3 py-2 text-sm"
+                  >
+                    <div>
+                      <p className="font-bold text-slate-700">
+                        {index + 1}. {entry.person}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        最近一次：{entry.latestMealName}
+                      </p>
+                    </div>
+                    <span className="font-extrabold text-emerald-600">
+                      {entry.count} 次
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-slate-400">尚無免單紀錄</p>
+              )}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-amber-100 bg-amber-50 p-3">
+            <div className="flex items-center justify-between">
+              <p className="font-bold text-amber-800">金主排行榜</p>
+              <span className="text-[11px] font-bold text-amber-600">
+                共 {sponsorRecords.length} 次付款
+              </span>
+            </div>
+            <div className="mt-3 space-y-2">
+              {sponsorLeaderboard.length > 0 ? (
+                sponsorLeaderboard.map((entry, index) => (
+                  <div
+                    key={`sponsor-${entry.person}`}
+                    className="flex items-center justify-between rounded-xl bg-white px-3 py-2 text-sm"
+                  >
+                    <div>
+                      <p className="font-bold text-slate-700">
+                        {index + 1}. {entry.person}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        最近一次：{entry.latestMealName}
+                      </p>
+                    </div>
+                    <span className="font-extrabold text-amber-600">
+                      {entry.count} 次
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-slate-400">尚無金主紀錄</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -4546,23 +4792,25 @@ function ShoppingView() {
               </div>
             )}
             {coupon.type !== "category" && (
-            <div className="space-y-2 mb-5">
-              {coupon.thresholds.map((t, i) => (
-                <div
-                  key={i}
-                  className="flex justify-between bg-slate-50 p-3 rounded-xl border border-slate-100"
-                >
-                  <span className="text-sm font-medium text-slate-600">
-                    滿{" "}
-                    <span className="font-bold text-slate-800">{t.spend}</span>{" "}
-                    日圓
-                  </span>
-                  <span className="text-sm font-extrabold text-rose-500">
-                    {t.off}
-                  </span>
-                </div>
-              ))}
-            </div>
+              <div className="space-y-2 mb-5">
+                {coupon.thresholds.map((t, i) => (
+                  <div
+                    key={i}
+                    className="flex justify-between bg-slate-50 p-3 rounded-xl border border-slate-100"
+                  >
+                    <span className="text-sm font-medium text-slate-600">
+                      滿{" "}
+                      <span className="font-bold text-slate-800">
+                        {t.spend}
+                      </span>{" "}
+                      日圓
+                    </span>
+                    <span className="text-sm font-extrabold text-rose-500">
+                      {t.off}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
 
             {/* 判斷是給網址連結還是圖片顯示 */}
