@@ -10,5 +10,32 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+const requiredConfigKeys = [
+  "apiKey",
+  "authDomain",
+  "projectId",
+  "storageBucket",
+  "messagingSenderId",
+  "appId",
+];
+
+const missingConfigKeys = requiredConfigKeys.filter(
+  (key) => !firebaseConfig[key],
+);
+
+export let db = null;
+export let firebaseInitError = null;
+
+if (missingConfigKeys.length > 0) {
+  firebaseInitError = `Missing Firebase env vars: ${missingConfigKeys.join(", ")}`;
+  console.error(firebaseInitError);
+} else {
+  try {
+    const app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+  } catch (error) {
+    firebaseInitError =
+      error instanceof Error ? error.message : "Failed to initialize Firebase.";
+    console.error("Firebase initialization failed:", error);
+  }
+}
