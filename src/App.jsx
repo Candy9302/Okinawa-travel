@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+﻿import React, { useState, useEffect } from "react";
 import {
   Plane,
   MapPin,
@@ -419,7 +419,7 @@ export default function OkinawaTravelApp() {
       title: "",
       amount: "",
       exchangeRate: exchangeRate,
-      payer: "我",
+      payer: FAMILY_MEMBERS[0],
       splitAmong: [...FAMILY_MEMBERS],
     });
 
@@ -1314,6 +1314,8 @@ export default function OkinawaTravelApp() {
               sponsorDraws={sponsorDraws}
               sponsorRecords={sponsorRecords}
               luckyRecords={luckyRecords}
+              setSponsorRecords={setSponsorRecords}
+              setLuckyRecords={setLuckyRecords}
               sponsorLeaderboard={sponsorLeaderboard}
               luckyLeaderboard={luckyLeaderboard}
               startSponsorDraw={startSponsorDraw}
@@ -1593,14 +1595,29 @@ function LegacyItineraryView({
         {
           type: "spot",
           time: "13:00",
-          title: "取車 (三菱 Delica)",
-          desc: "自駕，尋找大型停車場",
+          title: "OCEAN STAR 租車接駁",
+          desc: "領完行李後，前往國內航站樓 1F 14-C 站台搭接駁車。",
+          options: [
+            {
+              name: "OCEAN STAR 租車接駁資訊",
+              desc: "OCEAN STAR 租車將在國內航站樓 1 層，14-C 號站台等候。\n\n請提取行李後，聯絡工作人員，工作人員會安排接駁車輛前往租車公司協助取車。\n\n建議：\n1. 領完行李後先集合。\n2. 前往 1F 14-C Rental car shuttle bus 站台。\n3. 到站台後聯絡 OCEAN STAR 工作人員。\n4. 搭接駁車前往租車公司辦理取車。",
+              map: "https://maps.google.com/?q=Naha+Airport+Domestic+Terminal",
+              img: "/source/ocean-star-shuttle-14c.jpg",
+              note: " 集合地點：國內航站樓 1F / 14-C 號站台",
+            },
+          ],
         },
         {
           type: "spot",
           time: "15:00",
           title: "蒙帕公寓式飯店 Check-in",
-          desc: "約40分車程，美國村旁",
+          options: [
+            {
+              name: "蒙帕公寓式飯店",
+              desc: "約40分車程，美國村旁",
+              map: "https://maps.google.com/?q=蒙帕公寓酒店",
+            },
+          ],
         },
         {
           type: "food",
@@ -1657,6 +1674,17 @@ function LegacyItineraryView({
               desc: "營業 11:00–21:00。推薦沖繩鹽餅乾 / 紅芋冰，海景第一排吃冰淇淋！",
               map: "https://maps.google.com/?q=Blue+Seal+北谷",
             },
+            {
+              name: "Daiso Aeon Chatan 大創",
+              desc: "營業 10:00–22:00。",
+              map: "https://maps.google.com/?q=Daiso+Aeon+Chatan",
+            },
+            {
+              name: "Chatan Park Sunset Beach",
+              desc: "營業 9:00–18:00。「日落海灘」是美國村最著名的景點之一，以絕美夕陽景色聞名。",
+              map: "https://maps.google.com/?q=Chatan+Park+Sunset+Beach",
+              img: "/source/sunset-beach.jpg",
+            },
           ],
         },
         {
@@ -1667,7 +1695,18 @@ function LegacyItineraryView({
           options: [
             {
               name: "迴轉壽司市場 美浜店",
-              desc: "人氣平價迴轉壽司",
+              desc: "人氣平價迴轉壽司，推薦炙燒系列與沖繩特色壽司。",
+              note: "🍣 必吃推薦：\n\
+        • 大トロ（鮪魚大腹）約 ¥260/貫，油脂超香。\n\
+        • エビフライにぎり（炸蝦握壽司）是招牌。\n\
+        • 炙燒鮭魚／炙燒起司系列推薦。\n\
+        • 海ぶどう軍艦（海葡萄軍艦）是沖繩特色。\n\
+        \n📍 點餐小提醒：\n\
+        • 『おすすめ』= 今日推薦。\n\
+        • 看到迴轉台有小旗子的通常是當日新鮮推薦。\n\
+        • 『炙り』= 炙燒系列。\n\
+        • 『大トロ』= 鮪魚大腹。\n\
+        • 『海ぶどう』= 海葡萄。",
               map: "https://maps.google.com/?q=迴轉壽司市場+美浜店",
               img: "/food/cycleSushi.jpg",
             },
@@ -2045,6 +2084,17 @@ function LegacyItineraryView({
               desc: "沖繩傳統陶器街，很適合文青散步買紀念品。",
               map: "https://maps.google.com/?q=壺屋通",
             },
+
+            {
+              name: "永旺 那霸店",
+              desc: "營業時間 8:00-23:00。",
+              map: "https://maps.google.com/?q=永旺+那霸店",
+            },
+            {
+              name: "iias 沖繩豐崎",
+              desc: "營業時間 10:00-21:00。",
+              map: "https://maps.google.com/?q=iias+沖繩豐崎",
+            },
             {
               name: "第一牧志公設市場",
               desc: "營業時間 8:00-22:00。沖繩的廚房，推薦尋找隱藏美味「大城屋」。",
@@ -2085,7 +2135,7 @@ function LegacyItineraryView({
             },
             {
               name: "Haruchii",
-              desc: "特色肉卷飯糰",
+              desc: "特色肉卷飯糰，裡面有包糖心蛋",
               map: "https://maps.google.com/?q=Haruchii+那霸",
               img: "/food/haruchii.jpg",
             },
@@ -2136,8 +2186,18 @@ function LegacyItineraryView({
             },
             {
               name: "UNIQLO",
-              desc: "天久店 或 那霸店",
+              desc: "天久店",
               map: "https://maps.google.com/?q=UNIQLO+Ryubo+Ameku+Rakuichi",
+            },
+            {
+              name: "UNIQLO",
+              desc: "沖繩浦添PARCO CITY店",
+              map: "https://maps.google.com/?q=UNIQLO+優衣庫+沖繩浦添PARCO+CITY店",
+            },
+            {
+              name: "UNIQLO",
+              desc: "iias沖繩豐崎店",
+              map: "https://maps.google.com/?q=UNIQLO+優衣庫+優衣庫+iias沖繩豐崎店",
             },
             {
               name: "無印良品 (天久店)",
@@ -2656,9 +2716,18 @@ function LegacyItineraryView({
               handleCloseForm={handleCloseForm}
               editingId={editingId}
               sponsorDraws={sponsorDraws}
+              sponsorRecords={sponsorRecords}
+              luckyRecords={luckyRecords}
+              setSponsorRecords={setSponsorRecords}
+              setLuckyRecords={setLuckyRecords}
+              sponsorLeaderboard={sponsorLeaderboard}
+              luckyLeaderboard={luckyLeaderboard}
               startSponsorDraw={startSponsorDraw}
+              startLuckyDraw={startLuckyDraw}
               exchangeRate={exchangeRate}
               handleOpenForm={handleOpenForm}
+              drawMealName={drawMealName}
+              setDrawMealName={setDrawMealName}
             />
           </div>
         )}
@@ -2932,8 +3001,17 @@ function ItineraryView({
         {
           type: "spot",
           time: "13:00",
-          title: "取車 (三菱 Delica)",
-          desc: "自駕，尋找大型停車場",
+          title: "OCEAN STAR 租車接駁",
+          desc: "領完行李後，前往國內航站樓 1F 14-C 站台搭接駁車。",
+          options: [
+            {
+              name: "OCEAN STAR 租車接駁資訊",
+              desc: "OCEAN STAR 租車將在國內航站樓 1 層，14-C 號站台等候。\n\n請提取行李後，聯絡工作人員，工作人員會安排接駁車輛前往租車公司協助取車。\n\n建議：\n1. 領完行李後先集合。\n2. 前往 1F 14-C Rental car shuttle bus 站台。\n3. 到站台後聯絡 OCEAN STAR 工作人員。\n4. 搭接駁車前往租車公司辦理取車。",
+              map: "https://maps.google.com/?q=Naha+Airport+Domestic+Terminal",
+              img: "/source/ocean-star-shuttle-14c.jpg",
+              note: " 集合地點：國內航站樓 1F / 14-C 號站台",
+            },
+          ],
         },
         {
           type: "spot",
@@ -2996,6 +3074,17 @@ function ItineraryView({
               desc: "營業 11:00–21:00。推薦沖繩鹽餅乾 / 紅芋冰，海景第一排吃冰淇淋！",
               map: "https://maps.google.com/?q=Blue+Seal+北谷",
             },
+            {
+              name: "Daiso Aeon Chatan 大創",
+              desc: "營業 10:00–22:00。",
+              map: "https://maps.google.com/?q=Daiso+Aeon+Chatan",
+            },
+            {
+              name: "Chatan Park Sunset Beach",
+              desc: "營業 9:00–18:00。",
+              map: "https://maps.google.com/?q=Chatan+Park+Sunset+Beach",
+              img: "/source/sunset-beach.jpg",
+            },
           ],
         },
         {
@@ -3006,7 +3095,19 @@ function ItineraryView({
           options: [
             {
               name: "迴轉壽司市場 美浜店",
-              desc: "人氣平價迴轉壽司",
+              desc: "人氣平價迴轉壽司，推薦炙燒系列與沖繩特色壽司。",
+              note: ` 必吃推薦：
+• 大トロ（鮪魚大腹）約 ¥260/貫，油脂超香。
+• エビフライにぎり（炸蝦握壽司）是招牌。
+• 炙燒鮭魚／炙燒起司系列推薦。
+• 海ぶどう軍艦（海葡萄軍艦）是沖繩特色。
+
+ 點餐小提醒：
+• おすすめ = 今日推薦
+• 看到迴轉台有小旗子的通常是當日新鮮推薦
+• 炙り = 炙燒系列
+• 大トロ = 鮪魚大腹
+• 海ぶどう = 海葡萄`,
               map: "https://maps.google.com/?q=迴轉壽司市場+美浜店",
               img: "/food/cycleSushi.jpg",
             },
@@ -3555,7 +3656,15 @@ function ItineraryView({
           type: "spot",
           time: "13:30",
           title: "抵達租車公司還車",
-          desc: "滿油還車、保留加油收據！最晚 15:30 前要還車。\n建議 13:30 到租車公司，最晚 13:50 到並等接駁去機場。\n最好是 14:00 前到機場！",
+          desc: "點擊查看",
+          options: [
+            {
+              name: "OCEAN STAR 還車提醒",
+              desc: "滿油還車、保留加油收據！最晚 15:30 前要還車。\n\n建議 13:30 抵達租車公司，最晚 13:50 到，並等接駁車前往機場。\n最好 14:00 前抵達機場！",
+              map: "https://maps.google.com/?q=ocean+star+rent+a+car+okinawa",
+              note: "⛽ 記得滿油還車，並保留加油收據。",
+            },
+          ],
         },
         {
           type: "flight",
@@ -4085,6 +4194,8 @@ function AccountingView({
   sponsorDraws,
   sponsorRecords,
   luckyRecords,
+  setSponsorRecords,
+  setLuckyRecords,
   sponsorLeaderboard,
   luckyLeaderboard,
   startSponsorDraw,
@@ -4095,6 +4206,8 @@ function AccountingView({
   setDrawMealName,
 }) {
   const [view, setView] = useState("list");
+  const [recordDetailState, setRecordDetailState] = useState(null);
+  const [recordMealDrafts, setRecordMealDrafts] = useState({});
 
   // 🚀 計算台幣總花費 (使用每筆帳目的專屬匯率，若無則用最新匯率)
   const totalSpentTWD = expenses.reduce((sum, exp) => {
@@ -4142,6 +4255,86 @@ function AccountingView({
 
   const latestLuckyRecord = luckyRecords[0];
   const latestSponsorRecord = sponsorRecords[0];
+
+  const formatRecordDate = (createdAt) => {
+    if (!createdAt) return "未知時間";
+    return new Date(createdAt).toLocaleString("zh-TW", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const formatMethodLabel = (method) => {
+    switch (method) {
+      case "secret":
+        return "終極密碼";
+      case "slot":
+        return "滾輪抽籤";
+      case "grid":
+        return "五燈獎九宮格";
+      case "grid-bonus":
+        return "五燈獎加成";
+      case "wheel":
+        return "幸運轉盤";
+      case "scratch":
+        return "刮刮樂";
+      case "omikuji":
+        return "波上宮神籤";
+      default:
+        return "其他抽籤";
+    }
+  };
+
+  const getRecordKey = (type, record) =>
+    `${type}-${record.person}-${record.createdAt || 0}-${record.method || ""}-${record.mode || ""}`;
+
+  const openRecordDetails = (type, entry) => {
+    const sourceRecords = type === "lucky" ? luckyRecords : sponsorRecords;
+    const personRecords = sourceRecords.filter(
+      (record) => record.person === entry.person,
+    );
+    const drafts = personRecords.reduce((acc, record) => {
+      acc[getRecordKey(type, record)] = record.mealName || "";
+      return acc;
+    }, {});
+
+    setRecordMealDrafts(drafts);
+    setRecordDetailState({
+      type,
+      person: entry.person,
+    });
+  };
+
+  const closeRecordDetails = () => {
+    setRecordDetailState(null);
+    setRecordMealDrafts({});
+  };
+
+  const saveRecordMealName = (type, targetRecord) => {
+    const setter = type === "lucky" ? setLuckyRecords : setSponsorRecords;
+    const draftKey = getRecordKey(type, targetRecord);
+    const nextMealName = (recordMealDrafts[draftKey] || "").trim();
+
+    setter((prev) =>
+      prev.map((record) =>
+        record.person === targetRecord.person &&
+        (record.createdAt || 0) === (targetRecord.createdAt || 0) &&
+        (record.method || "") === (targetRecord.method || "") &&
+        (record.mode || "") === (targetRecord.mode || "")
+          ? { ...record, mealName: nextMealName }
+          : record,
+      ),
+    );
+  };
+
+  const detailRecords = recordDetailState
+    ? (recordDetailState.type === "lucky" ? luckyRecords : sponsorRecords)
+        .filter((record) => record.person === recordDetailState.person)
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    : [];
 
   return (
     <div className="space-y-4">
@@ -4479,22 +4672,31 @@ function AccountingView({
             <div className="mt-3 space-y-2">
               {luckyLeaderboard.length > 0 ? (
                 luckyLeaderboard.map((entry, index) => (
-                  <div
+                  <button
                     key={`lucky-${entry.person}`}
-                    className="flex items-center justify-between rounded-xl bg-white px-3 py-2 text-sm"
+                    type="button"
+                    onClick={() => openRecordDetails("lucky", entry)}
+                    className="w-full rounded-xl bg-white px-3 py-2 text-left text-sm"
                   >
-                    <div>
-                      <p className="font-bold text-slate-700">
-                        {index + 1}. {entry.person}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        最近一次：{entry.latestMealName}
-                      </p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-700">
+                          {index + 1}. {entry.person}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          最近一次：{entry.latestMealName || "未填寫餐名"}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="text-[11px] font-bold text-emerald-700">
+                          查看明細
+                        </span>
+                        <span className="font-extrabold text-emerald-600">
+                          {entry.count} 次
+                        </span>
+                      </div>
                     </div>
-                    <span className="font-extrabold text-emerald-600">
-                      {entry.count} 次
-                    </span>
-                  </div>
+                  </button>
                 ))
               ) : (
                 <p className="text-sm text-slate-400">尚無免單紀錄</p>
@@ -4511,22 +4713,31 @@ function AccountingView({
             <div className="mt-3 space-y-2">
               {sponsorLeaderboard.length > 0 ? (
                 sponsorLeaderboard.map((entry, index) => (
-                  <div
+                  <button
                     key={`sponsor-${entry.person}`}
-                    className="flex items-center justify-between rounded-xl bg-white px-3 py-2 text-sm"
+                    type="button"
+                    onClick={() => openRecordDetails("sponsor", entry)}
+                    className="w-full rounded-xl bg-white px-3 py-2 text-left text-sm"
                   >
-                    <div>
-                      <p className="font-bold text-slate-700">
-                        {index + 1}. {entry.person}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        最近一次：{entry.latestMealName}
-                      </p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-700">
+                          {index + 1}. {entry.person}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          最近一次：{entry.latestMealName || "未填寫餐名"}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="text-[11px] font-bold text-amber-700">
+                          查看明細
+                        </span>
+                        <span className="font-extrabold text-amber-600">
+                          {entry.count} 次
+                        </span>
+                      </div>
                     </div>
-                    <span className="font-extrabold text-amber-600">
-                      {entry.count} 次
-                    </span>
-                  </div>
+                  </button>
                 ))
               ) : (
                 <p className="text-sm text-slate-400">尚無金主紀錄</p>
@@ -4535,6 +4746,90 @@ function AccountingView({
           </div>
         </div>
       </section>
+      {recordDetailState && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            onClick={closeRecordDetails}
+          />
+          <div className="relative z-10 w-full max-w-md rounded-3xl bg-white p-4 shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <p className="text-lg font-extrabold text-slate-800">
+                  {recordDetailState.person}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {recordDetailState.type === "lucky"
+                    ? "幸運兒排行榜明細"
+                    : "金主排行榜明細"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeRecordDetails}
+                className="rounded-full bg-slate-100 p-1.5 text-slate-400"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-4 max-h-[80vh] space-y-3 overflow-y-auto pr-1">
+              {detailRecords.map((record, index) => {
+                const recordKey = getRecordKey(recordDetailState.type, record);
+                return (
+                  <div
+                    key={recordKey}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-400">
+                          #{index + 1}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatRecordDate(record.createdAt)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          來源：{formatMethodLabel(record.method)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          saveRecordMealName(recordDetailState.type, record)
+                        }
+                        className={`shrink-0 text-[11px] font-bold ${
+                          recordDetailState.type === "lucky"
+                            ? "text-emerald-700"
+                            : "text-amber-700"
+                        }`}
+                      >
+                        儲存
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={recordMealDrafts[recordKey] ?? ""}
+                      onChange={(e) =>
+                        setRecordMealDrafts((prev) => ({
+                          ...prev,
+                          [recordKey]: e.target.value,
+                        }))
+                      }
+                      placeholder="未填寫餐名"
+                      className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
+                    />
+                    <p className="mt-2 text-xs text-slate-500">
+                      目前顯示：
+                      {(recordMealDrafts[recordKey] || "").trim() ||
+                        "未填寫餐名"}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
