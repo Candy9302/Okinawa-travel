@@ -1685,6 +1685,12 @@ function LegacyItineraryView({
               map: "https://maps.google.com/?q=Chatan+Park+Sunset+Beach",
               img: "/source/sunset-beach.jpg",
             },
+            {
+              name: "北谷日落步道",
+              desc: "不是非常長的步道，但視野開闊，可以從不同角度欣賞美國村的繽紛建築和湛藍大海。傍晚時分來訪更是絕佳選擇，可以拍攝夕陽餘暉下的美景。",
+              map: "https://maps.google.com/?q=北谷日落步道",
+              img: "/source/sunset-beach.jpg",
+            },
           ],
         },
         {
@@ -1922,6 +1928,14 @@ function LegacyItineraryView({
           time: "15:00",
           title: "Hotel Urbansea 2 Check-in",
           desc: "國際通附近",
+          options: [
+            {
+              name: "ホテル アーバンシー2松尾",
+              desc: "3 星級飯店",
+              map: "https://maps.google.com/?q=Hotel+Urbansea+2matsuo",
+              img: "/source/urbansea.jpg",
+            },
+          ],
         },
         {
           type: "shopping",
@@ -3017,7 +3031,14 @@ function ItineraryView({
           type: "spot",
           time: "15:00",
           title: "蒙帕公寓式飯店 Check-in",
-          desc: "約40分車程，美國村旁",
+          desc: "點擊查看 1 項內容",
+          options: [
+            {
+              name: "蒙帕公寓式飯店",
+              desc: "約40分車程，美國村旁",
+              map: "https://maps.google.com/?q=蒙帕公寓酒店",
+            },
+          ],
         },
         {
           type: "food",
@@ -3322,7 +3343,15 @@ function ItineraryView({
           type: "spot",
           time: "15:00",
           title: "Hotel Urbansea 2 Check-in",
-          desc: "國際通附近",
+          desc: "點擊查看 1 項內容",
+          options: [
+            {
+              name: "ホテル アーバンシー2松尾",
+              desc: "3 星級飯店",
+              map: "https://maps.google.com/?q=Hotel+Urbansea+2matsuo",
+              img: "/source/urbansea.jpg",
+            },
+          ],
         },
         {
           type: "shopping",
