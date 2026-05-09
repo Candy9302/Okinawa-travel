@@ -138,6 +138,28 @@ function createSecretGuessRows(participants) {
   }));
 }
 
+function mergeMissingRecords(prevRecords, nextRecords) {
+  const seen = new Set(
+    prevRecords.map(
+      (record) =>
+        `${record.person}-${record.mode}-${record.createdAt || 0}-${record.method || ""}`,
+    ),
+  );
+
+  const missingRecords = nextRecords.filter((record) => {
+    const key = `${record.person}-${record.mode}-${record.createdAt || 0}-${record.method || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return missingRecords.length > 0 ? [...missingRecords, ...prevRecords] : prevRecords;
+}
+
+function buildRankingRecordId({ person, mode, method, createdAt }) {
+  return `${mode || "unknown"}-${method || "slot"}-${createdAt || 0}-${encodeURIComponent(person || "unknown")}`;
+}
+
 export default function OkinawaTravelApp() {
   const [activeTab, setActiveTab] = useState("itinerary");
   const [currency, setCurrency] = useState("JPY");
@@ -319,13 +341,41 @@ export default function OkinawaTravelApp() {
       q,
       (snapshot) => {
         setFirebaseError(null);
-        setSponsorDraws(
-          snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
-        );
+        setSponsorDraws(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
       },
       (error) => {
         console.error("payer_draws snapshot failed:", error);
         setFirebaseError("Firebase sponsor draw sync failed.");
+      },
+    );
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!db) return;
+    const q = query(
+      collection(db, "ranking_records"),
+      orderBy("createdAt", "desc"),
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setFirebaseError(null);
+        const rankingRecords = snapshot.docs.map((recordDoc) => ({
+          id: recordDoc.id,
+          ...recordDoc.data(),
+        }));
+
+        setSponsorRecords(
+          rankingRecords.filter((record) => record.mode === "sponsor"),
+        );
+        setLuckyRecords(
+          rankingRecords.filter((record) => record.mode === "meal-free"),
+        );
+      },
+      (error) => {
+        console.error("ranking_records snapshot failed:", error);
+        setFirebaseError("Firebase ranking sync failed. Using local cache.");
       },
     );
     return () => unsubscribe();
@@ -629,6 +679,13 @@ export default function OkinawaTravelApp() {
     secretWinner = null,
   }) => {
     const createdAt = Date.now();
+    const normalizedMealName = drawMealName.trim() || "未填寫餐名";
+    const rankingRecordId = buildRankingRecordId({
+      person: winner,
+      mode: scenario,
+      method,
+      createdAt,
+    });
     setSponsorDrawState((prev) => ({
       ...prev,
       isRolling: false,
@@ -639,10 +696,12 @@ export default function OkinawaTravelApp() {
     }));
 
     const record = {
+      id: rankingRecordId,
+      sourceId: rankingRecordId,
       mode: scenario,
       method,
       person: winner,
-      mealName: drawMealName.trim(),
+      mealName: normalizedMealName,
       createdAt,
     };
 
@@ -656,8 +715,12 @@ export default function OkinawaTravelApp() {
 
     try {
       const firestore = getDbOrThrow();
+      await setDoc(doc(firestore, "ranking_records", rankingRecordId), record);
+
       await addDoc(collection(firestore, "payer_draws"), {
         payer: winner,
+        mealName: normalizedMealName,
+        method,
         scenario,
         scenarioLabel,
         createdAt,
@@ -4342,7 +4405,7 @@ function AccountingView({
     setRecordMealDrafts({});
   };
 
-  const saveRecordMealName = (type, targetRecord) => {
+  const saveRecordMealName = async (type, targetRecord) => {
     const setter = type === "lucky" ? setLuckyRecords : setSponsorRecords;
     const draftKey = getRecordKey(type, targetRecord);
     const nextMealName = (recordMealDrafts[draftKey] || "").trim();
@@ -4357,6 +4420,18 @@ function AccountingView({
           : record,
       ),
     );
+
+    if (!db || !targetRecord.id) return;
+
+    try {
+      const firestore = getDbOrThrow();
+      await updateDoc(doc(firestore, "ranking_records", targetRecord.id), {
+        mealName: nextMealName,
+      });
+    } catch (error) {
+      setFirebaseError(error.message);
+      alert(error.message);
+    }
   };
 
   const detailRecords = recordDetailState
